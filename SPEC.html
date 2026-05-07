@@ -1,0 +1,189 @@
+<!doctype html>
+<!--
+  Renderer for SPEC.md — keeps the markdown file as the single source of
+  truth and converts it to HTML at view time using the marked library.
+  Edit SPEC.md and this page picks up the change on next reload.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RBS Resolver — Algorithm specification</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/marked@13.0.2/marked.min.js"></script>
+<style>
+:root {
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --border: #d6dae0;
+  --text: #1f2329;
+  --muted: #5f6470;
+  --accent: #2563eb;
+  --code-bg: #f0f2f5;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.55;
+}
+nav.topbar {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+nav.topbar a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+nav.topbar a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+nav.topbar .right { font-size: 12px; color: var(--muted); }
+main {
+  max-width: 920px;
+  margin: 32px auto 80px;
+  padding: 0 28px;
+}
+main.loading, main.error {
+  text-align: center;
+  color: var(--muted);
+  padding-top: 80px;
+}
+main.error h2 { color: #dc2626; }
+main h1 {
+  font-size: 26px;
+  font-weight: 600;
+  margin: 0 0 18px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+main h2 {
+  font-size: 19px;
+  font-weight: 600;
+  margin: 32px 0 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+main h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 24px 0 8px;
+}
+main h4 { font-size: 14px; font-weight: 600; margin: 18px 0 6px; }
+main p { margin: 8px 0 12px; }
+main a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+}
+main a:hover { border-bottom-style: solid; }
+main hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 28px 0;
+}
+main ul, main ol { padding-left: 22px; }
+main li { margin: 4px 0; }
+main code {
+  background: var(--code-bg);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+main pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+main pre code { background: transparent; padding: 0; }
+main table {
+  border-collapse: collapse;
+  margin: 12px 0 18px;
+  font-size: 14px;
+  width: auto;
+  max-width: 100%;
+}
+main th, main td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+main th {
+  background: #f0f2f5;
+  font-weight: 600;
+}
+main blockquote {
+  border-left: 3px solid var(--border);
+  margin: 12px 0;
+  padding: 4px 14px;
+  color: var(--muted);
+  background: var(--panel);
+}
+main strong { font-weight: 600; }
+</style>
+</head>
+<body>
+<nav class="topbar">
+  <a href="./index.html">&larr; Back to RBS Resolver</a>
+  <span class="right">
+    <a href="./SPEC.md" download style="border:none;">Download .md</a>
+  </span>
+</nav>
+<main id="content" class="loading">Loading specification&hellip;</main>
+<script>
+(function () {
+  const root = document.getElementById('content');
+  fetch('./SPEC.md', { cache: 'no-cache' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching SPEC.md');
+      return r.text();
+    })
+    .then(function (md) {
+      // marked v13: parse() returns a string of HTML.
+      // We trust SPEC.md content because it's served from the same origin.
+      root.innerHTML = window.marked.parse(md, { gfm: true, breaks: false });
+      root.classList.remove('loading');
+      // Rewrite anchor links so framework-source citations open in a new tab,
+      // and external links remain external.
+      const links = root.querySelectorAll('a[href]');
+      links.forEach(function (a) {
+        const href = a.getAttribute('href');
+        if (/^https?:\/\//.test(href) || /^[A-Z][\w.]+\//.test(href)) {
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener');
+        }
+      });
+    })
+    .catch(function (err) {
+      root.classList.remove('loading');
+      root.classList.add('error');
+      root.innerHTML =
+        '<h2>Could not load SPEC.md</h2>' +
+        '<p>' + (err && err.message ? err.message : String(err)) + '</p>' +
+        '<p>If you opened this page from the file system (file://), browsers ' +
+        'block <code>fetch()</code>. Serve the folder over HTTP (the included ' +
+        '<code>web.config</code> works with IIS) or use the ' +
+        '<a href="./SPEC.md" download>Download .md</a> link.</p>';
+    });
+})();
+</script>
+</body>
+</html>
