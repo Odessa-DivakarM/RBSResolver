@@ -1,0 +1,1705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RBS Resolver — Odessa Framework permission visualizer</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --border: #d6dae0;
+  --text: #1f2329;
+  --muted: #5f6470;
+  --accent: #2563eb;
+  --accent-soft: #dbeafe;
+  --warning-bg: #fff4e5;
+  --warning-border: #f59e0b;
+  --warning-text: #92400e;
+
+  --F: #D8E4BC;
+  --M: #FFF2CC;
+  --R: #FCD5B4;
+  --N: #DA9694;
+  --X: #F0F0F0;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+header.app {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 28px;
+}
+header.app h1 { font-size: 18px; margin: 0; font-weight: 600; }
+header.app .sub { color: var(--muted); font-size: 12px; margin-top: 4px; max-width: 900px; }
+.layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 20px;
+  padding: 20px 28px;
+  align-items: start;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.panel + .panel { margin-top: 16px; }
+.panel h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--muted);
+  transition: border-color 0.15s, background 0.15s;
+  display: block;
+}
+.dropzone:hover, .dropzone.drag {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.dropzone input { display: none; }
+.field { margin-bottom: 10px; }
+.field label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.field select, .field input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: white;
+}
+.tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.tab {
+  padding: 6px 12px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  flex: 1;
+}
+.tab.active { background: var(--accent); border-color: var(--accent); color: white; }
+button.primary {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 9px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  width: 100%;
+}
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary {
+  background: white;
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 7px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+.role-row {
+  display: grid;
+  grid-template-columns: 1fr 100px 28px;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+.role-row input, .role-row select {
+  padding: 5px 6px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-width: 0;
+}
+.role-row .remove {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  color: var(--muted);
+  height: 26px;
+}
+.role-row .remove:hover { color: #dc2626; border-color: #dc2626; }
+.banner {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+  color: var(--warning-text);
+  font-size: 13px;
+}
+.final-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.final-badge {
+  width: 92px; height: 92px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  font-size: 36px; font-weight: 700;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+.final-info { flex: 1; min-width: 0; }
+.final-info h3 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+.final-info .formula {
+  color: var(--text);
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 12px;
+  margin: 4px 0 8px;
+  background: #f0f2f5;
+  padding: 6px 10px;
+  border-radius: 4px;
+  display: inline-block;
+}
+.final-info .ux { font-size: 13px; color: var(--muted); }
+table.sheet {
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 0;
+  table-layout: auto;
+}
+table.sheet th, table.sheet td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: center;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  min-width: 36px;
+  vertical-align: middle;
+}
+table.sheet th {
+  background: #f0f2f5;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+}
+table.sheet th.role { text-align: center; }
+table.sheet th.identifier { text-align: left; }
+table.sheet td.row-name {
+  text-align: left;
+  font-family: inherit;
+  background: #fafbfc;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cell-F { background: var(--F); }
+.cell-M { background: var(--M); }
+.cell-R { background: var(--R); }
+.cell-N { background: var(--N); color: white; }
+.cell-X { background: var(--X); color: var(--muted); }
+.cell-read { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cell-stop { box-shadow: inset 0 0 0 3px var(--accent); font-weight: 700; }
+.row-perm td.row-name { background: #dbeafe; color: #1e40af; }
+.row-cond td.row-name { font-style: italic; color: var(--muted); background: #f5f5f7; }
+.row-cond td { background: #fafafb; color: var(--muted); }
+.row-op-active td.row-name { background: #fef3c7; }
+.col-unmatched { opacity: 0.4; text-decoration: line-through; }
+.cell-unmatched { opacity: 0.45; }
+.scroll-x { overflow-x: auto; padding-bottom: 4px; }
+.trace-list { margin: 0; padding-left: 22px; font-size: 13px; }
+.trace-list li { margin-bottom: 4px; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
+.trace-list .stop { color: var(--accent); font-weight: 600; }
+.trace-list .fall { color: var(--muted); }
+.role-trace {
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: #f8fafd;
+  border-radius: 0 4px 4px 0;
+}
+.role-trace.group-b { border-left-color: #94a3b8; background: #f8fafc; }
+.role-trace.common { border-left-color: #a78bfa; background: #faf5ff; }
+.steps-key {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0;
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.steps-key summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.steps-key summary::-webkit-details-marker { display: none; }
+.steps-key summary::before {
+  content: '▸';
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.steps-key[open] summary::before { transform: rotate(90deg); }
+.steps-key .key-body { padding: 4px 12px 12px; }
+.steps-key table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.steps-key table th, .steps-key table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.steps-key table th {
+  font-weight: 600;
+  background: #eef1f5;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.steps-key table td.step-num {
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  width: 1%;
+}
+.steps-key .skipped { color: var(--muted); font-style: italic; }
+.steps-key p.foot {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+.role-trace h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.legend {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.legend span { display: inline-flex; align-items: center; gap: 4px; }
+.legend .swatch { width: 14px; height: 14px; border: 1px solid var(--border); display: inline-block; }
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.empty-state .big { font-size: 14px; margin-bottom: 6px; font-weight: 600; color: var(--text); }
+.test-results {
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px;
+}
+.test-results .pass { color: #059669; }
+.test-results .fail { color: #dc2626; font-weight: 700; }
+.test-results .summary { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); font-weight: 600; }
+code.inline {
+  background: #f0f2f5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.muted-note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<header class="app">
+  <h1>RBS Resolver</h1>
+  <div class="sub">
+    Visualises how the Odessa Framework's role-based security sheet resolves into a final permission for a given user, target,
+    and field. Upload your RBS workbook, pick a target, list the user's roles, and inspect the cascade.
+  </div>
+</header>
+<div class="layout">
+  <div class="left">
+    <div class="panel">
+      <h2>Step 1 &middot; workbook</h2>
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="file" accept=".xlsx,.xls">
+        <div id="dropMsg"><strong>Drop .xlsx here</strong> or click to browse</div>
+      </label>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button class="secondary" id="loadDemo" style="flex:1;">Load demo workbook</button>
+      </div>
+    </div>
+    <div class="panel" id="queryPanel" style="display:none;">
+      <h2>Step 2 &middot; query target</h2>
+      <div class="tabs" id="tabs"></div>
+      <div class="field">
+        <label>Block</label>
+        <select id="block"></select>
+      </div>
+      <div class="field">
+        <label>Operation (optional)</label>
+        <select id="operation">
+          <option value="">&mdash; entity-level &mdash;</option>
+        </select>
+      </div>
+    </div>
+    <div class="panel" id="rolesPanel" style="display:none;">
+      <h2>Step 3 &middot; user roles</h2>
+      <div class="field">
+        <label>Site-level default <span style="text-transform:none; letter-spacing:0; font-weight:400;">(<code class="inline">Global.UserRole.DefaultRolePermission</code>)</span></label>
+        <select id="siteLevelDefault">
+          <option value="F" selected>F &mdash; Full</option>
+          <option value="M">M &mdash; Modify</option>
+          <option value="R">R &mdash; Read</option>
+          <option value="N">N &mdash; None</option>
+        </select>
+      </div>
+      <div id="roleList"></div>
+      <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
+      <p class="muted-note">DefaultPermission is the value that role carries on the master <code class="inline">Roles</code> entity in the database. If it is <code class="inline">X</code>, the framework substitutes the site-level default at login time (<a href="#" id="showXNote" style="color:var(--accent);">why?</a>).</p>
+      <div id="xNote" style="display:none; font-size:12px; color:var(--muted); margin-top:6px; padding:8px 10px; background:#f8fafc; border:1px solid var(--border); border-radius:4px;">
+        <code class="inline">UserContextHelper.cs</code> reads <code class="inline">Global.UserRole.DefaultRolePermission</code> when building the user's role list. Any role whose stored DefaultPermission is <code class="inline">X</code> is rewritten to that site-level value before the cascade ever runs &mdash; so step&nbsp;5 in production never sees <code class="inline">X</code>.
+      </div>
+    </div>
+    <div class="panel" id="conditionsPanel" style="display:none;">
+      <h2>Step 4 &middot; entity condition values</h2>
+      <p class="muted-note" style="margin-top:0;">Conditional RBS columns only match when the entity's actual condition values agree. Set each to <code class="inline">T</code> or <code class="inline">F</code> to simulate. Unset values cannot satisfy a <code class="inline">T</code>/<code class="inline">F</code> demand and will filter that column out.</p>
+      <div id="conditionList"></div>
+    </div>
+    <div class="panel" id="actionPanel" style="display:none;">
+      <button class="primary" id="evaluate">Evaluate permission</button>
+      <button class="secondary" id="runTests" style="margin-top:8px; width:100%;">Run sanity tests</button>
+    </div>
+  </div>
+  <div class="right">
+    <div id="output">
+      <div class="empty-state">
+        <div class="big">No workbook loaded</div>
+        Upload an RBS .xlsx file or click <em>Load demo workbook</em> on the left to begin.
+      </div>
+    </div>
+  </div>
+</div>
+<datalist id="rolesList"></datalist>
+<script>
+// ============================================================
+// Permission codes & ordering: X < N < R < M < F
+// ============================================================
+const PERM_RANK = { X: 0, N: 1, R: 2, M: 3, F: 4 };
+const PERM_NAME = { F: 'Full', M: 'Modify', R: 'Read', N: 'None', X: 'Undefined' };
+const UX_EFFECT = {
+  F: 'All actions enabled and all fields editable.',
+  M: 'Form opens for editing; admin actions hidden.',
+  R: 'Form opens read-only; action buttons hidden, fields not editable.',
+  N: 'Form blocked entirely; entity hidden from grids and menus.',
+  X: 'No rule resolved; effectively None &mdash; form blocked.'
+};
+
+function maxPerm() {
+  let best = 'X';
+  for (let i = 0; i < arguments.length; i++) {
+    const p = arguments[i];
+    if (p == null || p === '') continue;
+    const u = String(p).toUpperCase();
+    if (PERM_RANK[u] != null && PERM_RANK[u] > PERM_RANK[best]) best = u;
+  }
+  return best;
+}
+// Mirrors Lw.Sys.Model.Security.Permission.Parse: accepts single-letter codes (F, M, R, N, X)
+// AND full words ("Full", "Modify", "Read", "None", "Undefined"), case-insensitive.
+const PERM_WORD = { FULL: 'F', MODIFY: 'M', READ: 'R', NONE: 'N', UNDEFINED: 'X' };
+function normCode(v) {
+  const s = String(v == null ? '' : v).trim().toUpperCase();
+  if (!s) return 'X';
+  if (PERM_RANK[s] != null) return s;
+  if (PERM_WORD[s] != null) return PERM_WORD[s];
+  return 'X';
+}
+// Bool3 condition values. Strict mirror of Lw.Sys.Common.DataTypes.Bool3.Parse:
+//   blank → X       (don't care)
+//   "x"   → X
+//   "y"   → T       (yes/true)
+//   "n"   → F       (no/false)
+//   anything else → X here (the real parser throws). Internally-built blocks
+//   (demo, sanity tests) must therefore feed workbook-form Y/N, not T/F.
+function normBool3(v) {
+  const s = String(v == null ? '' : v).trim().toUpperCase();
+  if (!s) return 'X';
+  if (s === 'X') return 'X';
+  if (s === 'Y') return 'T';
+  if (s === 'N') return 'F';
+  return 'X';
+}
+
+// ============================================================
+// Workbook & block parsing
+// ============================================================
+function parseWorkbook(wb) {
+  const out = { Entities: [], Transactions: [], Tasks: [], roles: [] };
+
+  if (wb.Sheets['Roles']) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets['Roles'], { header: 1, defval: '' });
+    for (const r of rows) {
+      const v = String(r[0] == null ? '' : r[0]).trim();
+      if (!v || v === '#') continue;
+      if (/^roles?$/i.test(v)) continue;
+      out.roles.push(v);
+    }
+  }
+  for (const name of ['Entities', 'Transactions', 'Tasks']) {
+    if (!wb.Sheets[name]) continue;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+    out[name] = parseBlocks(rows);
+  }
+  return out;
+}
+
+function parseBlocks(rows) {
+  const blocks = [];
+  let cur = null, afterPerms = false;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const c0 = String(row[0] == null ? '' : row[0]).trim();
+
+    if (c0 === '#') {
+      if (cur) blocks.push(cur);
+      cur = null; afterPerms = false;
+      continue;
+    }
+    if (!c0 && !cur) continue;
+    if (!cur) {
+      cur = parseHeader(row, i);
+      afterPerms = false;
+      continue;
+    }
+    if (c0.toLowerCase() === 'permissions') {
+      // Column-indexed array of permission codes; mirrors AbstractPermissionTableParser.ParsePermissionHeader.
+      cur.permissions = extractColumnPermissions(row, cur, 'Permissions');
+      cur.permissionsRowIdx = i;
+      afterPerms = true;
+      continue;
+    }
+    if (!c0) continue;
+    if (afterPerms) {
+      cur.operations.push({
+        name: c0,
+        label: row[1] == null ? '' : row[1],
+        rowIdx: i,
+        // Column-indexed; each entry is an F/M/R/N/X code per role column.
+        values: extractColumnPermissions(row, cur, c0)
+      });
+    } else {
+      // Conditions: T/F/X per role column (Bool3). Stored both on the condition row
+      // and accumulated onto each roleColumn's conditionValues array, mirroring
+      // PermissionTableRoleColumn.ConditionValues in the framework.
+      const colVals = extractColumnBool3(row, cur, c0);
+      cur.conditions.push({
+        name: c0,
+        label: row[1] == null ? '' : row[1],
+        rowIdx: i,
+        values: colVals
+      });
+      for (let k = 0; k < cur.roleColumns.length; k++) {
+        cur.roleColumns[k].conditionValues.push(colVals[k]);
+      }
+    }
+  }
+  if (cur) blocks.push(cur);
+  return blocks;
+}
+
+function parseHeader(row, idx) {
+  const block = {
+    identifier: String(row[0]).trim(),
+    label: row[1] == null ? '' : row[1],
+    roleColumns: [],
+    hasLabel: true,
+    conditions: [],
+    permissions: null,
+    operations: [],
+    headerRowIdx: idx,
+    parseWarnings: []
+  };
+  let start = 2;
+  if (String(row[1] == null ? '' : row[1]).trim() === '*') {
+    start = 1;
+    block.hasLabel = false;
+    block.label = '';
+  }
+  let colIdx = 0;
+  for (let i = start; i < row.length; i++) {
+    const v = String(row[i] == null ? '' : row[i]).trim();
+    if (!v) break;
+    // columnIndex is the position within roleColumns (used by lookup arrays).
+    // Duplicate role names across columns are preserved.
+    block.roleColumns.push({ name: v, colIndex: i, columnIndex: colIdx++, conditionValues: [] });
+  }
+  return block;
+}
+
+// During workbook parsing we track values the real framework would have rejected.
+// Bool3.Parse and Permission.Parse both throw on unknown text; we coerce to X
+// (so the rest of the evaluation can proceed) and warn the user.
+function isValidBool3Token(s) {
+  if (!s) return true;
+  const u = s.toUpperCase();
+  return u === 'X' || u === 'Y' || u === 'N';
+}
+function isValidPermissionToken(s) {
+  if (!s) return true;
+  const u = s.toUpperCase();
+  if (PERM_RANK[u] != null) return true;
+  if (PERM_WORD[u] != null) return true;
+  return false;
+}
+
+function extractColumnPermissions(row, block, rowLabel) {
+  return block.roleColumns.map(rc => {
+    const raw = String(row[rc.colIndex] == null ? '' : row[rc.colIndex]).trim();
+    if (!isValidPermissionToken(raw)) {
+      block.parseWarnings.push(
+        `${rowLabel} × ${rc.name}[col${rc.columnIndex}]: "${raw}" is not a valid permission code — Permission.Parse would throw. Coerced to X.`
+      );
+    }
+    return normCode(raw);
+  });
+}
+function extractColumnBool3(row, block, rowLabel) {
+  return block.roleColumns.map(rc => {
+    const raw = String(row[rc.colIndex] == null ? '' : row[rc.colIndex]).trim();
+    if (!isValidBool3Token(raw)) {
+      block.parseWarnings.push(
+        `${rowLabel} × ${rc.name}[col${rc.columnIndex}]: "${raw}" is not a valid Bool3 value (expected blank, X, Y or N) — Bool3.Parse would throw. Coerced to X.`
+      );
+    }
+    return normBool3(raw);
+  });
+}
+
+// ============================================================
+// Evaluation algorithm
+// ============================================================
+// Decide if a role column "matches" given the entity's condition state.
+// Mirrors the DecisionTable column matching in PermissionTableExecutor.cs:
+//   - X (don't care) ⇒ always matches.
+//   - T ⇒ matches only when the entity condition is true.
+//   - F ⇒ matches only when the entity condition is false.
+// The role-self condition (HasRole) is handled by the caller (Group A vs B classification).
+function columnMatches(roleColumn, conditions, entityState) {
+  for (let i = 0; i < conditions.length; i++) {
+    const cv = roleColumn.conditionValues[i] || 'X';
+    if (cv === 'X') continue;
+    const ev = entityState ? entityState[conditions[i].name] : null;
+    if (ev !== 'T' && ev !== 'F') return false; // unset entity value cannot satisfy a T/F demand
+    if (cv !== ev) return false;
+  }
+  return true;
+}
+
+// Find the first * (common-role) column that matches; if none, return null.
+function findMatchingStarColumn(block, entityState) {
+  const starCols = block.roleColumns.filter(rc => rc.name === '*');
+  for (const rc of starCols) {
+    if (columnMatches(rc, block.conditions, entityState)) return rc;
+  }
+  return null;
+}
+
+function evaluate(block, operationName, userRoles, siteLevel, entityState) {
+  const siteLevelPerm = normCode(siteLevel || 'F');
+  const trace = {
+    groupA: [],
+    groupB: [],
+    common: null,
+    readCells: new Set(),
+    stopCells: new Set(),
+    unconfiguredPerm: 'X',
+    shortCircuit: false,
+    operationName,
+    opRowFound: null,
+    final: 'X',
+    roleBasedPerm: null,
+    siteLevelPerm,
+    substitutions: [],
+    matchedColumns: [],   // [{ columnIndex, name }]
+    unmatchedColumns: [], // columns filtered out by entity conditions
+    starColumn: null,
+    entityState: entityState || {}
+  };
+
+  // Pre-process: substitute role.defaultPermission == X with site-level value (mirrors UserContextHelper.cs).
+  const resolvedRoles = userRoles.map(r => {
+    const stored = normCode(r.defaultPermission);
+    if (stored === 'X') {
+      trace.substitutions.push({ role: r.name, stored, resolved: siteLevelPerm });
+      return { name: r.name, defaultPermission: siteLevelPerm, _wasX: true, _stored: stored };
+    }
+    return { name: r.name, defaultPermission: stored, _wasX: false, _stored: stored };
+  });
+
+  // Classify columns by condition match.
+  for (const rc of block.roleColumns) {
+    const matches = columnMatches(rc, block.conditions, entityState);
+    if (matches) trace.matchedColumns.push(rc);
+    else trace.unmatchedColumns.push(rc);
+  }
+  trace.starColumn = findMatchingStarColumn(block, entityState);
+
+  // Group B = user roles whose name does not appear in ANY column at all
+  // (mirrors PermissionResultBuilder.UnconfiguredRolesPermission). Note the
+  // framework uses raw RoleColumns membership, NOT match status — so a role
+  // with conditional columns that all fail to match is still NOT in Group B.
+  const namesInTable = new Set(block.roleColumns.map(c => c.name));
+  const groupBRoles = resolvedRoles.filter(r => r.name && !namesInTable.has(r.name));
+
+  for (const r of groupBRoles) {
+    trace.groupB.push({
+      role: r.name,
+      defaultPerm: r.defaultPermission,
+      storedPerm: r._stored,
+      substituted: r._wasX
+    });
+    trace.unconfiguredPerm = maxPerm(trace.unconfiguredPerm, r.defaultPermission);
+  }
+
+  if (trace.unconfiguredPerm === 'F') {
+    trace.shortCircuit = true;
+    trace.final = 'F';
+    return trace;
+  }
+
+  let opRow = null;
+  if (operationName) {
+    opRow = block.operations.find(o => o.name === operationName) || null;
+    trace.opRowFound = !!opRow;
+  }
+
+  // Build the per-(user-role, matched-column) cascade list. Production
+  // evaluates one cascade per matched column via _decisionTable.SelectMany +
+  // _rolePermissions.Max — duplicate role columns therefore each get their
+  // own cascade and are MAX'd together.
+  const cascadeTargets = [];
+  const userNameSet = new Set(resolvedRoles.filter(r => r.name).map(r => r.name));
+  for (const rc of trace.matchedColumns) {
+    if (rc.name === '*') continue; // * is the common path, not Group A
+    if (!userNameSet.has(rc.name)) continue;
+    const userRole = resolvedRoles.find(r => r.name === rc.name);
+    cascadeTargets.push({ roleColumn: rc, userRole });
+  }
+
+  const recordRead = (rowKey, key) => trace.readCells.add(rowKey + '|' + key);
+  const recordStop = (rowKey, key) => trace.stopCells.add(rowKey + '|' + key);
+
+  let roleBasedPerm = null;
+
+  // Compute name counts so the cascade can omit [colN] tags when not ambiguous.
+  const targetCounts = {};
+  for (const tgt of cascadeTargets) targetCounts[tgt.roleColumn.name] = (targetCounts[tgt.roleColumn.name] || 0) + 1;
+  const starCount = block.roleColumns.filter(c => c.name === '*').length;
+
+  if (cascadeTargets.length > 0) {
+    for (const target of cascadeTargets) {
+      const ambig = targetCounts[target.roleColumn.name] > 1;
+      const ambigStar = starCount > 1;
+      const cas = cascadeForColumn(block, target.userRole, target.roleColumn, opRow, operationName, trace.starColumn, recordRead, recordStop, ambig, ambigStar);
+      trace.groupA.push({
+        role: target.userRole.name,
+        columnIndex: target.roleColumn.columnIndex,
+        defaultPerm: target.userRole.defaultPermission,
+        storedPerm: target.userRole._stored,
+        substituted: target.userRole._wasX,
+        steps: cas.steps,
+        result: cas.result
+      });
+      roleBasedPerm = roleBasedPerm == null ? cas.result : maxPerm(roleBasedPerm, cas.result);
+    }
+  } else {
+    // No matched user-role column: production calls _commonRolePermission alone.
+    const steps = [];
+    let commonPerm;
+    if (!trace.starColumn) {
+      // No * column matched ⇒ commonRolePermission is empty (X for all).
+      commonPerm = 'X';
+      steps.push({ desc: 'No * column matched (entity conditions filtered it out)', value: 'X', stop: true, cell: null });
+    } else {
+      const starIdx = trace.starColumn.columnIndex;
+      const starKey = 'col' + starIdx;
+      const starLabel = starCount > 1 ? `*[col${starIdx}]` : '*';
+      if (opRow) {
+        commonPerm = opRow.values[starIdx];
+        recordRead('op', starKey);
+        steps.push({ desc: `${operationName} × ${starLabel}`, value: commonPerm, stop: commonPerm !== 'X', cell: { row: 'op', col: starKey } });
+        if (commonPerm === 'X') {
+          commonPerm = (block.permissions || [])[starIdx] || 'X';
+          recordRead('perm', starKey);
+          steps.push({ desc: `Permissions × ${starLabel}`, value: commonPerm, stop: true, cell: { row: 'perm', col: starKey } });
+          recordStop('perm', starKey);
+        } else {
+          recordStop('op', starKey);
+        }
+      } else {
+        commonPerm = (block.permissions || [])[starIdx] || 'X';
+        recordRead('perm', starKey);
+        steps.push({ desc: `Permissions × ${starLabel}`, value: commonPerm, stop: true, cell: { row: 'perm', col: starKey } });
+        recordStop('perm', starKey);
+      }
+    }
+    trace.common = { steps, result: commonPerm };
+    roleBasedPerm = commonPerm;
+  }
+
+  trace.roleBasedPerm = roleBasedPerm;
+  trace.final = maxPerm(trace.unconfiguredPerm, roleBasedPerm);
+  return trace;
+}
+
+// 5-step cascade against a SPECIFIC matched column index (rather than by role name).
+// Steps 2 and 4 fall through to the matched * column, mirroring _commonRolePermission lookup.
+// `ambiguous` / `ambiguousStar` cause column indices to be shown in step descriptions
+// only when the same role name appears in multiple columns (otherwise the labels are noise).
+function cascadeForColumn(block, userRole, roleColumn, opRow, operationName, starColumn, recordRead, recordStop, ambiguous, ambiguousStar) {
+  const steps = [];
+  const colIdx = roleColumn.columnIndex;
+  const colKey = 'col' + colIdx;
+  const starIdx = starColumn ? starColumn.columnIndex : null;
+  const starKey = starIdx != null ? 'col' + starIdx : null;
+  const colLabel = ambiguous ? `${roleColumn.name}[col${colIdx}]` : roleColumn.name;
+  const starLabel = ambiguousStar ? `*[col${starIdx}]` : '*';
+
+  const probe = (n, rowKey, key, value, label) => {
+    recordRead(rowKey, key);
+    const stop = value !== 'X';
+    steps.push({ n, desc: label, value, stop, cell: { row: rowKey, col: key } });
+    if (stop) recordStop(rowKey, key);
+    return stop;
+  };
+
+  if (opRow) {
+    let v = opRow.values[colIdx] || 'X';
+    if (probe(1, 'op', colKey, v, `${operationName} × ${colLabel}`)) return { steps, result: v };
+    if (starKey != null) {
+      v = opRow.values[starIdx] || 'X';
+      if (probe(2, 'op', starKey, v, `${operationName} × ${starLabel}`)) return { steps, result: v };
+    } else {
+      steps.push({ n: 2, desc: 'Step 2 skipped — no matching * column', value: 'X', stop: false, cell: null });
+    }
+  }
+  let v = (block.permissions || [])[colIdx] || 'X';
+  if (probe(3, 'perm', colKey, v, `Permissions × ${colLabel}`)) return { steps, result: v };
+  if (starKey != null) {
+    v = (block.permissions || [])[starIdx] || 'X';
+    if (probe(4, 'perm', starKey, v, `Permissions × ${starLabel}`)) return { steps, result: v };
+  } else {
+    steps.push({ n: 4, desc: 'Step 4 skipped — no matching * column', value: 'X', stop: false, cell: null });
+  }
+  const fallback = userRole.defaultPermission;
+  steps.push({ n: 5, desc: `${userRole.name}.DefaultPermission (DB)`, value: fallback, stop: true, cell: null });
+  return { steps, result: fallback };
+}
+
+// ============================================================
+// State
+// ============================================================
+let parsed = null;
+let currentSheet = 'Entities';
+let currentBlock = null;
+let siteLevelDefault = 'F';
+const userRoles = [];
+let entityState = {}; // { conditionName: 'T' | 'F' | undefined }
+
+// ============================================================
+// UI wiring
+// ============================================================
+const $ = id => document.getElementById(id);
+const dropzone = $('dropzone');
+const fileInput = $('file');
+
+dropzone.addEventListener('click', e => {
+  if (e.target.tagName !== 'INPUT') fileInput.click();
+});
+['dragenter', 'dragover'].forEach(e => dropzone.addEventListener(e, ev => { ev.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(e => dropzone.addEventListener(e, ev => { ev.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', ev => {
+  if (ev.dataTransfer.files.length) handleFile(ev.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', ev => { if (ev.target.files.length) handleFile(ev.target.files[0]); });
+
+function handleFile(f) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      parsed = parseWorkbook(wb);
+      $('dropMsg').innerHTML = `<strong>Loaded:</strong> ${escapeHtml(f.name)}`;
+      onLoaded();
+    } catch (err) {
+      $('dropMsg').textContent = 'Failed to read file: ' + err.message;
+    }
+  };
+  reader.readAsArrayBuffer(f);
+}
+
+$('loadDemo').addEventListener('click', () => {
+  parsed = buildDemoWorkbook();
+  $('dropMsg').innerHTML = '<strong>Loaded:</strong> built-in demo';
+  onLoaded();
+});
+
+function onLoaded() {
+  if (!parsed) return;
+  $('queryPanel').style.display = '';
+  $('rolesPanel').style.display = '';
+  $('conditionsPanel').style.display = '';
+  $('actionPanel').style.display = '';
+  refreshRolesList();
+  renderTabs();
+  if (userRoles.length === 0) addRoleRow();
+  renderRoles();
+  selectSheet('Entities');
+  $('output').innerHTML = `
+    <div class="empty-state">
+      <div class="big">Workbook loaded</div>
+      Pick a sheet, block, and roles, then click <em>Evaluate permission</em>.
+    </div>`;
+}
+
+function refreshRolesList() {
+  const dl = $('rolesList');
+  dl.innerHTML = '';
+  for (const n of (parsed.roles || [])) {
+    const opt = document.createElement('option'); opt.value = n; dl.appendChild(opt);
+  }
+}
+
+function renderTabs() {
+  const tabs = $('tabs');
+  tabs.innerHTML = '';
+  for (const s of ['Entities', 'Transactions', 'Tasks']) {
+    const btn = document.createElement('button');
+    btn.className = 'tab' + (currentSheet === s ? ' active' : '');
+    btn.textContent = `${s} (${parsed[s].length})`;
+    btn.addEventListener('click', () => selectSheet(s));
+    tabs.appendChild(btn);
+  }
+}
+
+function selectSheet(s) {
+  currentSheet = s;
+  renderTabs();
+  const sel = $('block');
+  sel.innerHTML = '';
+  for (const b of parsed[s]) {
+    const opt = document.createElement('option');
+    opt.value = b.identifier;
+    opt.textContent = b.identifier + (b.label ? ` — ${b.label}` : '');
+    sel.appendChild(opt);
+  }
+  if (parsed[s].length) {
+    sel.value = parsed[s][0].identifier;
+    selectBlock();
+  } else {
+    currentBlock = null;
+    $('operation').innerHTML = '<option value="">— no blocks in this sheet —</option>';
+  }
+}
+
+$('block').addEventListener('change', selectBlock);
+function selectBlock() {
+  const id = $('block').value;
+  currentBlock = parsed[currentSheet].find(b => b.identifier === id) || null;
+  const opSel = $('operation');
+  opSel.innerHTML = '<option value="">— block-level (no operation) —</option>';
+  if (currentBlock) {
+    for (const o of currentBlock.operations) {
+      const opt = document.createElement('option');
+      opt.value = o.name;
+      opt.textContent = o.name + (o.label ? ` — ${o.label}` : '');
+      opSel.appendChild(opt);
+    }
+  }
+  renderConditions();
+}
+
+function renderConditions() {
+  const panel = $('conditionsPanel');
+  const list = $('conditionList');
+  list.innerHTML = '';
+  if (!currentBlock || currentBlock.conditions.length === 0) {
+    panel.style.display = 'none';
+    entityState = {};
+    return;
+  }
+  panel.style.display = '';
+  entityState = {}; // reset on block change
+  for (const c of currentBlock.conditions) {
+    const row = document.createElement('div');
+    row.className = 'role-row';
+    row.style.gridTemplateColumns = '1fr 100px';
+    const lbl = document.createElement('div');
+    lbl.style.fontFamily = 'ui-monospace, "Cascadia Code", Menlo, Consolas, monospace';
+    lbl.style.fontSize = '12px';
+    lbl.style.padding = '4px 0';
+    lbl.textContent = c.name;
+    row.appendChild(lbl);
+    const sel = document.createElement('select');
+    // Workbook cells use Y/N (Bool3.Parse); internally we store T/F (Bool3 canonical).
+    for (const opt of [{ v: '', t: '— unset —' }, { v: 'T', t: 'Y (yes / true)' }, { v: 'F', t: 'N (no / false)' }]) {
+      const o = document.createElement('option');
+      o.value = opt.v; o.textContent = opt.t;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', e => {
+      const v = e.target.value;
+      if (v) entityState[c.name] = v;
+      else delete entityState[c.name];
+    });
+    row.appendChild(sel);
+    list.appendChild(row);
+  }
+}
+
+$('addRole').addEventListener('click', () => { addRoleRow(); renderRoles(); });
+function addRoleRow() {
+  userRoles.push({ name: (parsed && parsed.roles && parsed.roles[0]) || '', defaultPermission: 'N' });
+}
+function renderRoles() {
+  const list = $('roleList');
+  list.innerHTML = '';
+  userRoles.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'role-row';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = r.name;
+    nameInput.setAttribute('list', 'rolesList');
+    nameInput.placeholder = 'role name';
+    nameInput.addEventListener('input', e => r.name = e.target.value);
+    row.appendChild(nameInput);
+    const permSel = document.createElement('select');
+    for (const p of ['F', 'M', 'R', 'N', 'X']) {
+      const opt = document.createElement('option');
+      opt.value = p; opt.textContent = `${p} — ${PERM_NAME[p]}`;
+      if (r.defaultPermission === p) opt.selected = true;
+      permSel.appendChild(opt);
+    }
+    permSel.addEventListener('change', e => r.defaultPermission = e.target.value);
+    row.appendChild(permSel);
+    const rm = document.createElement('button');
+    rm.className = 'remove'; rm.textContent = '×'; rm.title = 'Remove role';
+    rm.addEventListener('click', () => { userRoles.splice(i, 1); renderRoles(); });
+    row.appendChild(rm);
+    list.appendChild(row);
+  });
+}
+
+$('evaluate').addEventListener('click', runEvaluate);
+function runEvaluate() {
+  if (!currentBlock) return;
+  const opName = $('operation').value || null;
+  const trace = evaluate(currentBlock, opName, userRoles, siteLevelDefault, entityState);
+  renderResults(currentBlock, opName, trace);
+}
+
+const siteSel = $('siteLevelDefault');
+if (siteSel) siteSel.addEventListener('change', e => { siteLevelDefault = e.target.value; });
+const xNoteLink = $('showXNote');
+if (xNoteLink) xNoteLink.addEventListener('click', e => {
+  e.preventDefault();
+  const n = $('xNote');
+  n.style.display = n.style.display === 'none' ? '' : 'none';
+});
+
+// ============================================================
+// Rendering of results
+// ============================================================
+function renderResults(block, operationName, t) {
+  const out = $('output');
+  out.innerHTML = '';
+
+  // ---- banners
+  const banners = [];
+  if (t.shortCircuit) banners.push('Short-circuit: a Group B role grants Full from its DB default. The block\'s role-column header was still read (to classify Group A vs B), but the Permissions row, operation rows, and the per-role 5-step cascade were all skipped.');
+  if (userRoles.length === 0) {
+    banners.push('User has no roles defined here. The visualizer still computes a result via the * column for exploration, but in production a logged-in user with no roles is rejected at FetchUserRoles in UserContextHelper.cs ("InvalidRolesForUser") before any sheet evaluation runs.');
+  }
+  if (operationName && t.opRowFound === false) banners.push(`Operation "${operationName}" was not found in this block. The visualizer falls back to block-level evaluation, matching IPermissionResult.OperationPermissionOrDefault. The strict IPermissionResult.OperationPermission API would instead return X (effectively None).`);
+  if (t.unmatchedColumns.length) {
+    const list = t.unmatchedColumns.map(c => `${c.name}[col${c.columnIndex}]`).join(', ');
+    banners.push(`Condition filter: ${t.unmatchedColumns.length} role column(s) excluded by current entity condition values: ${list}.`);
+  }
+  if (currentBlock && currentBlock.conditions.length && Object.keys(t.entityState).length < currentBlock.conditions.length) {
+    banners.push(`This block has ${currentBlock.conditions.length} condition row(s); ${currentBlock.conditions.length - Object.keys(t.entityState).length} are unset. Unset values cannot satisfy a T/F demand and will exclude any column whose value is not X for that condition.`);
+  }
+  if (currentBlock && currentBlock.parseWarnings && currentBlock.parseWarnings.length) {
+    const max = 3;
+    const head = currentBlock.parseWarnings.slice(0, max).join(' | ');
+    const more = currentBlock.parseWarnings.length > max ? ` (+${currentBlock.parseWarnings.length - max} more)` : '';
+    banners.push(`Parse warning: ${head}${more}`);
+  }
+  if (t.substitutions && t.substitutions.length) {
+    const names = t.substitutions.map(s => `"${s.role}"`).join(', ');
+    banners.push(`Site-level substitution: ${names} had DB DefaultPermission = X, rewritten to site-level "${t.siteLevelPerm}" before evaluation. This mirrors UserContextHelper.cs behaviour.`);
+  }
+  const masterRoles = new Set(parsed && parsed.roles || []);
+  if (masterRoles.size) {
+    for (const r of userRoles) {
+      if (r.name && !masterRoles.has(r.name)) {
+        banners.push(`Role "${r.name}" is not in the master Roles sheet — verify the spelling.`);
+      }
+    }
+  }
+  for (const b of banners) {
+    const el = document.createElement('div'); el.className = 'banner'; el.textContent = b;
+    out.appendChild(el);
+  }
+
+  // ---- final card
+  out.appendChild(buildFinalCard(t));
+
+  // ---- mini sheet view
+  out.appendChild(buildSheetPanel(block, operationName, t));
+
+  // ---- resolution trace
+  out.appendChild(buildTracePanel(t));
+
+  // ---- conditions panel
+  if (block.conditions.length) out.appendChild(buildConditionsPanel(block));
+}
+
+function buildFinalCard(t) {
+  const card = document.createElement('div');
+  card.className = 'final-card';
+  const badge = document.createElement('div');
+  badge.className = 'final-badge cell-' + t.final;
+  badge.textContent = t.final;
+  card.appendChild(badge);
+  const info = document.createElement('div');
+  info.className = 'final-info';
+  info.innerHTML = `
+    <h3>${PERM_NAME[t.final]}${t.final === 'X' ? ' &mdash; effectively None' : ''}</h3>
+    <div class="formula">${makeFormula(t)}</div>
+    <div class="ux">${UX_EFFECT[t.final]}</div>`;
+  card.appendChild(info);
+  return card;
+}
+
+function makeFormula(t) {
+  if (t.shortCircuit) {
+    return 'unconfiguredPerm = F &rarr; short-circuit &rarr; <strong>Full</strong>';
+  }
+  let inner;
+  if (t.groupA.length) {
+    const counts = {};
+    for (const r of t.groupA) counts[r.role] = (counts[r.role] || 0) + 1;
+    inner = `roleBased = MAX(${t.groupA.map(r => {
+      const tag = counts[r.role] > 1 ? `[col${r.columnIndex}]` : '';
+      return `${escapeHtml(r.role)}${tag}=${r.result}`;
+    }).join(', ')}) = <strong>${t.roleBasedPerm}</strong>`;
+  } else if (t.common) {
+    inner = `commonPerm = <strong>${t.common.result}</strong>`;
+  } else {
+    inner = `roleBased = <strong>${t.roleBasedPerm || 'X'}</strong>`;
+  }
+  return `${inner}<br>final = MAX(unconfiguredPerm=${t.unconfiguredPerm}, ${t.roleBasedPerm == null ? 'commonPerm' : 'roleBased'}=${t.roleBasedPerm == null ? (t.common ? t.common.result : 'X') : t.roleBasedPerm}) = <strong>${t.final}</strong>`;
+}
+
+function buildSheetPanel(block, operationName, t) {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `<h2>Block &middot; ${escapeHtml(block.identifier)}${operationName ? ` &middot; operation: ${escapeHtml(operationName)}` : ' &middot; block-level'}</h2>`;
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  legend.innerHTML =
+    ['F','M','R','N','X'].map(p => `<span><span class="swatch cell-${p}"></span>${p} &mdash; ${PERM_NAME[p]}</span>`).join('') +
+    `<span><span class="swatch" style="border:2px solid var(--accent); background:white;"></span>read</span>` +
+    `<span><span class="swatch" style="box-shadow:inset 0 0 0 3px var(--accent); background:white;"></span>stopped cascade</span>`;
+  panel.appendChild(legend);
+  const wrap = document.createElement('div');
+  wrap.className = 'scroll-x';
+  wrap.appendChild(buildSheetTable(block, operationName, t));
+  panel.appendChild(wrap);
+  return panel;
+}
+
+function buildSheetTable(block, operationName, t) {
+  const readSet = t ? t.readCells : new Set();
+  const stopSet = t ? t.stopCells : new Set();
+  const unmatched = new Set((t && t.unmatchedColumns || []).map(c => c.columnIndex));
+  const tbl = document.createElement('table'); tbl.className = 'sheet';
+  const thead = document.createElement('thead'); const trh = document.createElement('tr');
+  const thn = document.createElement('th'); thn.className = 'identifier';
+  thn.textContent = block.identifier; trh.appendChild(thn);
+  // Only tag column index when the same role name appears more than once
+  // (i.e. genuine duplicate-column case in conditional RBS).
+  const nameCounts = {};
+  for (const rc of block.roleColumns) nameCounts[rc.name] = (nameCounts[rc.name] || 0) + 1;
+  for (const rc of block.roleColumns) {
+    const th = document.createElement('th'); th.className = 'role';
+    th.textContent = nameCounts[rc.name] > 1 ? `${rc.name} [col${rc.columnIndex}]` : rc.name;
+    if (unmatched.has(rc.columnIndex)) th.classList.add('col-unmatched');
+    trh.appendChild(th);
+  }
+  thead.appendChild(trh); tbl.appendChild(thead);
+  const tbody = document.createElement('tbody');
+
+  for (let ci = 0; ci < block.conditions.length; ci++) {
+    const c = block.conditions[ci];
+    const tr = document.createElement('tr'); tr.className = 'row-cond';
+    const td0 = document.createElement('td'); td0.className = 'row-name';
+    td0.textContent = c.name + (t && t.entityState[c.name] ? ` = ${t.entityState[c.name]}` : ' = ?');
+    tr.appendChild(td0);
+    for (const rc of block.roleColumns) {
+      const td = document.createElement('td');
+      td.textContent = c.values[rc.columnIndex] || '';
+      if (unmatched.has(rc.columnIndex)) td.classList.add('cell-unmatched');
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+
+  if (block.permissions) {
+    const tr = document.createElement('tr'); tr.className = 'row-perm';
+    const td0 = document.createElement('td'); td0.className = 'row-name'; td0.textContent = 'Permissions'; tr.appendChild(td0);
+    for (const rc of block.roleColumns) {
+      const v = block.permissions[rc.columnIndex] || 'X';
+      const td = document.createElement('td');
+      td.classList.add('cell-' + v);
+      if (unmatched.has(rc.columnIndex)) td.classList.add('cell-unmatched');
+      const key = 'perm|col' + rc.columnIndex;
+      if (readSet.has(key)) td.classList.add('cell-read');
+      if (stopSet.has(key)) td.classList.add('cell-stop');
+      td.textContent = v;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+
+  for (const o of block.operations) {
+    const tr = document.createElement('tr');
+    const isActive = operationName && o.name === operationName;
+    if (isActive) tr.classList.add('row-op-active');
+    const td0 = document.createElement('td'); td0.className = 'row-name'; td0.textContent = o.name; tr.appendChild(td0);
+    for (const rc of block.roleColumns) {
+      const v = o.values[rc.columnIndex] || 'X';
+      const td = document.createElement('td');
+      td.classList.add('cell-' + v);
+      if (unmatched.has(rc.columnIndex)) td.classList.add('cell-unmatched');
+      td.textContent = v;
+      if (isActive) {
+        const key = 'op|col' + rc.columnIndex;
+        if (readSet.has(key)) td.classList.add('cell-read');
+        if (stopSet.has(key)) td.classList.add('cell-stop');
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  tbl.appendChild(tbody);
+  return tbl;
+}
+
+function buildTracePanel(t) {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = '<h2>Resolution trace</h2>';
+  panel.appendChild(buildStepsKey(t));
+
+  if (t.shortCircuit) {
+    const p = document.createElement('p');
+    p.style.fontSize = '13px';
+    p.innerHTML = 'A role in <strong>Group B</strong> has DB <code class="inline">DefaultPermission = F</code>. ' +
+      'To compute <code class="inline">unconfiguredRolesPermission</code> only the block\'s role-column header was consulted ' +
+      '(to decide Group A vs Group B). Because that yielded <code class="inline">Full</code>, the framework skipped the ' +
+      'per-cell lookups against the Permissions row and operation rows &mdash; including the per-role 5-step cascade &mdash; ' +
+      'and returned <code class="inline">Full</code>.';
+    panel.appendChild(p);
+    panel.appendChild(buildGroupBSection(t));
+    return panel;
+  }
+
+  // Disambiguate role names only when a role appears more than once in Group A.
+  const groupACounts = {};
+  for (const r of t.groupA) groupACounts[r.role] = (groupACounts[r.role] || 0) + 1;
+  for (const role of t.groupA) {
+    const rt = document.createElement('div');
+    rt.className = 'role-trace';
+    const defaultBit = role.substituted
+      ? `DB default <s>X</s> &rarr; site-level <strong>${role.defaultPerm}</strong>`
+      : `DB default ${role.defaultPerm}`;
+    const colTag = groupACounts[role.role] > 1 ? ` &middot; column ${role.columnIndex}` : '';
+    rt.innerHTML = `<h4>${escapeHtml(role.role)}${colTag} &middot; Group A &middot; ${defaultBit} &rarr; result <strong>${role.result}</strong></h4>`;
+    rt.appendChild(buildStepList(role.steps));
+    panel.appendChild(rt);
+  }
+  if (t.common) {
+    const rt = document.createElement('div');
+    rt.className = 'role-trace common';
+    rt.innerHTML = `<h4>Common-only path &middot; no user roles in this block &rarr; <strong>${t.common.result}</strong></h4>`;
+    const ol = document.createElement('ol'); ol.className = 'trace-list';
+    t.common.steps.forEach((s, i) => {
+      const li = document.createElement('li');
+      const cls = s.stop ? 'stop' : 'fall';
+      li.innerHTML = `<span class="${cls}">Step ${i + 1}</span> &middot; ${escapeHtml(s.desc)} &rarr; <strong>${s.value}</strong> ${s.stop ? '&middot; stops' : '&middot; fall through'}`;
+      ol.appendChild(li);
+    });
+    rt.appendChild(ol);
+    panel.appendChild(rt);
+  }
+  panel.appendChild(buildGroupBSection(t));
+  return panel;
+}
+
+function buildStepsKey(t) {
+  const isGroupA = t.groupA.length > 0;
+  const isCommon = !!t.common;
+  const hasOp = !!t.operationName;
+  const det = document.createElement('details');
+  det.className = 'steps-key';
+  det.open = false;
+  const sum = document.createElement('summary');
+  sum.textContent = isGroupA
+    ? `What does Step 1–5 mean? (Group A · 5-step cascade per role)`
+    : `What does each step mean? (Common-only path · no user role is in this block)`;
+  det.appendChild(sum);
+  const body = document.createElement('div'); body.className = 'key-body';
+  const tbl = document.createElement('table');
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>#</th><th>Cell read</th><th>Source</th></tr>';
+  tbl.appendChild(thead);
+  const tbody = document.createElement('tbody');
+
+  const rows = isGroupA
+    ? [
+        { n: '1', cell: 'operation row × user-role column', src: 'Sheet', skipped: !hasOp, note: !hasOp ? 'skipped — no operation selected' : '' },
+        { n: '2', cell: 'operation row × * column',           src: 'Sheet', skipped: !hasOp, note: !hasOp ? 'skipped — no operation selected' : '' },
+        { n: '3', cell: 'Permissions row × user-role column', src: 'Sheet' },
+        { n: '4', cell: 'Permissions row × * column',         src: 'Sheet' },
+        { n: '5', cell: 'role.DefaultPermission',             src: 'DB · master Roles entity (X is rewritten to Global.UserRole.DefaultRolePermission at login)' }
+      ]
+    : (hasOp
+        ? [
+            { n: '1', cell: 'operation row × * column',  src: 'Sheet' },
+            { n: '2', cell: 'Permissions row × * column', src: 'Sheet', note: 'only if step 1 returned X' }
+          ]
+        : [
+            { n: '1', cell: 'Permissions row × * column', src: 'Sheet' }
+          ]);
+
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td'); td0.className = 'step-num'; td0.textContent = 'Step ' + r.n;
+    const td1 = document.createElement('td');
+    td1.innerHTML = escapeHtml(r.cell) + (r.note ? ` <span class="skipped">· ${escapeHtml(r.note)}</span>` : '');
+    if (r.skipped) td1.classList.add('skipped');
+    const td2 = document.createElement('td'); td2.textContent = r.src;
+    tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2);
+    tbody.appendChild(tr);
+  }
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const note = document.createElement('p'); note.className = 'foot';
+  note.innerHTML = isGroupA
+    ? 'The cascade stops at the first cell whose value is not <code class="inline">X</code>. The framework runs <em>one cascade per matched role column</em> (a role can have multiple columns gated by different conditions) and MAXes the results. Group B (role names absent from this block) contributes <code class="inline">MAX</code> over their DB defaults. If <code class="inline">unconfiguredPerm == Full</code> the per-cell lookups are skipped entirely. Otherwise final = <code class="inline">MAX(unconfiguredPerm, MAX over matched-column cascades)</code>.'
+    : 'No matched user-role column for this block, so the cascade is skipped &mdash; only the matched <code class="inline">*</code> column is consulted (or X if no <code class="inline">*</code> column matches the entity conditions), then combined with Group B via <code class="inline">MAX</code>.';
+  body.appendChild(note);
+  det.appendChild(body);
+  return det;
+}
+
+function buildStepList(steps) {
+  const ol = document.createElement('ol'); ol.className = 'trace-list';
+  for (const s of steps) {
+    const li = document.createElement('li');
+    const cls = s.stop ? 'stop' : 'fall';
+    li.innerHTML = `<span class="${cls}">Step ${s.n}</span> &middot; ${escapeHtml(s.desc)} &rarr; <strong>${s.value}</strong> ${s.stop ? '&middot; stops' : '&middot; fall through'}`;
+    ol.appendChild(li);
+  }
+  return ol;
+}
+
+function buildGroupBSection(t) {
+  const gb = document.createElement('div');
+  gb.className = 'role-trace group-b';
+  if (t.groupB.length === 0) {
+    gb.innerHTML = `<h4>Group B &middot; unconfigured roles &rarr; none</h4>
+      <p style="font-size:12px; color:var(--muted); margin:0;">Every user role appears as a column in this block.</p>`;
+  } else {
+    gb.innerHTML = `<h4>Group B &middot; unconfigured roles &rarr; unconfiguredPerm = <strong>${t.unconfiguredPerm}</strong></h4>`;
+    const ul = document.createElement('ul'); ul.className = 'trace-list'; ul.style.listStyle = 'square';
+    for (const r of t.groupB) {
+      const li = document.createElement('li');
+      const bit = r.substituted
+        ? `DB default <s>X</s> &rarr; site-level <strong>${r.defaultPerm}</strong>`
+        : `DB default <strong>${r.defaultPerm}</strong>`;
+      li.innerHTML = `${escapeHtml(r.role)} &middot; ${bit}`;
+      ul.appendChild(li);
+    }
+    gb.appendChild(ul);
+  }
+  return gb;
+}
+
+function buildConditionsPanel(block) {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = '<h2>Conditions on this block</h2>';
+  const wrap = document.createElement('div'); wrap.className = 'scroll-x';
+  const tbl = document.createElement('table'); tbl.className = 'sheet';
+  const thead = document.createElement('thead'); const trh = document.createElement('tr');
+  const th0 = document.createElement('th'); th0.className = 'identifier'; th0.textContent = 'Condition'; trh.appendChild(th0);
+  for (const rc of block.roleColumns) {
+    const th = document.createElement('th'); th.className = 'role'; th.textContent = rc.name; trh.appendChild(th);
+  }
+  thead.appendChild(trh); tbl.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const c of block.conditions) {
+    const tr = document.createElement('tr'); tr.className = 'row-cond';
+    const td0 = document.createElement('td'); td0.className = 'row-name'; td0.textContent = c.name; tr.appendChild(td0);
+    for (const rc of block.roleColumns) {
+      const td = document.createElement('td'); td.textContent = c.values[rc.columnIndex] || ''; tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  tbl.appendChild(tbody); wrap.appendChild(tbl); panel.appendChild(wrap);
+  const note = document.createElement('p');
+  note.className = 'muted-note';
+  note.innerHTML = 'Set entity condition values in <strong>Step 4</strong> on the left to filter columns. Production uses <code class="inline">DecisionTable.SelectMany</code> in <code class="inline">PermissionTableExecutor.cs</code> to drop columns whose <code class="inline">ConditionValues</code> conflict with the entity instance.';
+  panel.appendChild(note);
+  return panel;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============================================================
+// Demo workbook (covers the spec's test cases)
+// ============================================================
+// Build a block with column-indexed values. permsArr / opsArr are arrays
+// matching the order of `roles`. condRows is an array of { name, values: [...] }.
+function makeBlock(id, label, roles, permsArr, opsArr, condRows) {
+  const roleColumns = roles.map((n, i) => ({ name: n, colIndex: i + 1, columnIndex: i, conditionValues: [] }));
+  const conditions = (condRows || []).map(c => ({ name: c.name, label: '', values: c.values.slice() }));
+  for (let ci = 0; ci < conditions.length; ci++) {
+    for (let k = 0; k < roleColumns.length; k++) {
+      roleColumns[k].conditionValues.push(normBool3(conditions[ci].values[k]));
+    }
+  }
+  return {
+    identifier: id,
+    label: label || '',
+    roleColumns,
+    hasLabel: false,
+    conditions,
+    permissions: permsArr.map(normCode),
+    operations: opsArr.map(o => ({ name: o.name, label: '', values: o.values.map(normCode) }))
+  };
+}
+
+function buildDemoWorkbook() {
+  const entities = [
+    makeBlock('AcceleratedBalanceBreakdownofTax', 'Accelerated balance breakdown of tax',
+      ['*', 'Account Manager', 'Sales Manager'],
+      ['F', 'N', 'X'],
+      [
+        { name: 'Amount',   values: ['X', 'X', 'X'] },
+        { name: 'Customer', values: ['M', 'R', 'X'] },
+        { name: 'TaxCode',  values: ['F', 'N', 'M'] }
+      ]
+    ),
+    makeBlock('CreditMemo', 'Credit memo',
+      ['*', 'Account Manager', 'Sales Manager'],
+      ['R', 'M', 'F'],
+      [
+        { name: 'Amount',     values: ['X', 'F', 'X'] },
+        { name: 'ApprovedBy', values: ['R', 'X', 'X'] }
+      ],
+      [{ name: 'IsActive', values: ['X', 'Y', 'X'] }]
+    ),
+    // Demonstrates DUPLICATE role columns gated by conditions:
+    // Account Manager has two entries — one when IsActive=Y (yes/true),
+    // one when IsActive=N (no/false). Workbook form per Bool3.Parse.
+    makeBlock('Invoice', 'Invoice (conditional)',
+      ['*', 'Account Manager', 'Account Manager'],
+      ['X', 'F', 'R'],
+      [
+        { name: 'Amount',    values: ['R', 'X', 'X'] },
+        { name: 'Customer',  values: ['X', 'X', 'X'] }
+      ],
+      [{ name: 'IsActive', values: ['X', 'Y', 'N'] }]
+    )
+  ];
+
+  const transactions = [
+    makeBlock('PostInvoice', 'Post invoice',
+      ['*', 'Account Manager'],
+      ['X', 'F'], []
+    ),
+    makeBlock('VoidInvoice', 'Void invoice',
+      ['*', 'Account Manager', 'Sales Manager'],
+      ['N', 'F', 'X'], []
+    )
+  ];
+
+  const tasks = [
+    makeBlock('NightlyReconciliation', 'Nightly reconciliation',
+      ['*'], ['F'], []
+    )
+  ];
+
+  return {
+    Entities: entities,
+    Transactions: transactions,
+    Tasks: tasks,
+    roles: ['Account Manager', 'Sales Manager', 'System Admin', 'Read Only', 'Auditor']
+  };
+}
+
+// ============================================================
+// Sanity tests
+// ============================================================
+$('runTests').addEventListener('click', runTests);
+function runTests() {
+  const out = $('output');
+  out.innerHTML = '';
+  const panel = document.createElement('div'); panel.className = 'panel';
+  panel.innerHTML = '<h2>Sanity tests</h2>' +
+    '<p class="muted-note" style="margin-bottom:10px;">These exercise the algorithm against the cases in the spec.</p>';
+  const log = document.createElement('div'); log.className = 'test-results';
+  panel.appendChild(log);
+
+  const tests = [
+    {
+      name: 'Test 1a — AM only, entity-level, Permissions AM=N → N',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'], []),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'F' }],
+      expected: 'N'
+    },
+    {
+      name: 'Test 1b — AM only, Amount field, all X → cascades to Permissions AM=N → N',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'],
+        [{ name: 'Amount', values: ['X', 'X'] }]),
+      op: 'Amount',
+      roles: [{ name: 'Account Manager', defaultPermission: 'F' }],
+      expected: 'N'
+    },
+    {
+      name: 'Test 2a — Sales Manager only (not in block, default R), entity-level → MAX(R, F-from-*) = F',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'], []),
+      op: null,
+      roles: [{ name: 'Sales Manager', defaultPermission: 'R' }],
+      expected: 'F'
+    },
+    {
+      name: 'Test 2b — Sales Manager only, Amount field, common path falls through to Permissions × * = F → F',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'],
+        [{ name: 'Amount', values: ['X', 'X'] }]),
+      op: 'Amount',
+      roles: [{ name: 'Sales Manager', defaultPermission: 'R' }],
+      expected: 'F'
+    },
+    {
+      name: 'Test 3a — Amount *=R, AM=X; AM only (default F) → cascade stops at step 2 → R',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'],
+        [{ name: 'Amount', values: ['R', 'X'] }]),
+      op: 'Amount',
+      roles: [{ name: 'Account Manager', defaultPermission: 'F' }],
+      expected: 'R'
+    },
+    {
+      name: 'Test 3b — Amount *=R, AM=X; SM only (default M) → MAX(M, R) = M',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'],
+        [{ name: 'Amount', values: ['R', 'X'] }]),
+      op: 'Amount',
+      roles: [{ name: 'Sales Manager', defaultPermission: 'M' }],
+      expected: 'M'
+    },
+    {
+      name: 'Test 4 — AM (in block) + SM (not in block, default R), entity-level → MAX(R, N) = R',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'], []),
+      op: null,
+      roles: [
+        { name: 'Account Manager', defaultPermission: 'F' },
+        { name: 'Sales Manager', defaultPermission: 'R' }
+      ],
+      expected: 'R'
+    },
+    {
+      name: 'Test 5 — Group B short-circuit: SM default F → Full',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['N', 'N'], []),
+      op: null,
+      roles: [{ name: 'Sales Manager', defaultPermission: 'F' }],
+      expected: 'F'
+    },
+    {
+      name: 'Test 6 — empty user roles → common-only, Permissions × * = R → R',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['R', 'N'], []),
+      op: null,
+      roles: [],
+      expected: 'R'
+    },
+    {
+      name: 'Test 7 — DB default fallback: all sheet cells X, AM only default M → cascade step 5 → M',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['X', 'X'],
+        [{ name: 'Amount', values: ['X', 'X'] }]),
+      op: 'Amount',
+      roles: [{ name: 'Account Manager', defaultPermission: 'M' }],
+      expected: 'M'
+    },
+    {
+      name: 'Test 8 — Site-level X-substitution: AM default X, all sheet cells X, site-level R → R',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['X', 'X'],
+        [{ name: 'Amount', values: ['X', 'X'] }]),
+      op: 'Amount',
+      roles: [{ name: 'Account Manager', defaultPermission: 'X' }],
+      site: 'R',
+      expected: 'R'
+    },
+    {
+      name: 'Test 9 — Group B with X default + site-level F → short-circuits to Full',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['N', 'N'], []),
+      op: null,
+      roles: [{ name: 'Sales Manager', defaultPermission: 'X' }],
+      site: 'F',
+      expected: 'F'
+    },
+    {
+      name: 'Test 10 — Word-form Permission codes ("Full"/"Modify") parse correctly',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['Full', 'Modify'], []),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'F' }],
+      expected: 'M'
+    },
+    // Conditional RBS: AM[col1] active when IsActive=Y grants F; AM[col2] active when IsActive=N grants R.
+    // Workbook form (Bool3.Parse): blank/X/Y/N. Internally stored as T/F/X.
+    {
+      name: 'Test 11 — Duplicate role columns, IsActive=T → AM[col1] matches → F',
+      block: makeBlock('B', '', ['*', 'Account Manager', 'Account Manager'], ['X', 'F', 'R'], [],
+        [{ name: 'IsActive', values: ['X', 'Y', 'N'] }]),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
+      entity: { IsActive: 'T' },
+      expected: 'F'
+    },
+    {
+      name: 'Test 12 — Duplicate role columns, IsActive=F → AM[col2] matches → R',
+      block: makeBlock('B', '', ['*', 'Account Manager', 'Account Manager'], ['X', 'F', 'R'], [],
+        [{ name: 'IsActive', values: ['X', 'Y', 'N'] }]),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
+      entity: { IsActive: 'F' },
+      expected: 'R'
+    },
+    {
+      name: 'Test 13 — Both AM columns, both match (X conditions) → MAX(F, R) = F',
+      block: makeBlock('B', '', ['*', 'Account Manager', 'Account Manager'], ['X', 'F', 'R'], [],
+        [{ name: 'IsActive', values: ['X', 'X', 'X'] }]),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
+      entity: {},
+      expected: 'F'
+    },
+    {
+      name: 'Test 14 — All AM columns filtered out by condition + * matches → uses * column',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['R', 'F'], [],
+        [{ name: 'IsActive', values: ['X', 'Y'] }]),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
+      entity: { IsActive: 'F' },
+      expected: 'R'
+    },
+    {
+      // Bool3.Parse only accepts blank / x / y / n — not T/F/TRUE/FALSE.
+      // Verify Y/N values from a real workbook normalize correctly.
+      name: 'Test 15 — Y/N condition values (workbook form): condition Y matches IsActive=T → F',
+      block: makeBlock('B', '', ['*', 'Account Manager', 'Account Manager'], ['X', 'F', 'R'], [],
+        [{ name: 'IsActive', values: ['x', 'y', 'n'] }]),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
+      entity: { IsActive: 'T' },
+      expected: 'F'
+    },
+    {
+      name: 'Test 16 — Y/N condition values: condition N matches IsActive=F → R',
+      block: makeBlock('B', '', ['*', 'Account Manager', 'Account Manager'], ['X', 'F', 'R'], [],
+        [{ name: 'IsActive', values: ['x', 'y', 'n'] }]),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
+      entity: { IsActive: 'F' },
+      expected: 'R'
+    },
+    {
+      // Bool3.Parse rejects T/TRUE/anything outside blank/X/Y/N. We coerce to X
+      // (the framework would throw, but warning paths handle that during workbook
+      // parsing). Strict coercion means the column ends up as "don't care" for
+      // that condition — so it matches regardless of entity state, instead of
+      // being silently treated as a "true required" gate.
+      name: 'Test 17 — Strict Bool3: invalid "T"/"F" tokens coerced to X (don\'t care)',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['R', 'F'], [],
+        [{ name: 'IsActive', values: ['X', 'T'] }]),
+      op: null,
+      roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
+      entity: { IsActive: 'F' },
+      expected: 'F' // 'T' is invalid Bool3 → X → AM column always matches → F
+    }
+  ];
+
+  let passed = 0;
+  for (const tc of tests) {
+    const r = evaluate(tc.block, tc.op, tc.roles, tc.site || 'F', tc.entity || {});
+    const ok = r.final === tc.expected;
+    if (ok) passed++;
+    const div = document.createElement('div');
+    div.className = ok ? 'pass' : 'fail';
+    div.textContent = `${ok ? 'PASS' : 'FAIL'} · ${tc.name} · got ${r.final}, expected ${tc.expected}`;
+    log.appendChild(div);
+  }
+  const summary = document.createElement('div');
+  summary.className = 'summary ' + (passed === tests.length ? 'pass' : 'fail');
+  summary.textContent = `${passed} / ${tests.length} passed`;
+  log.appendChild(summary);
+  out.appendChild(panel);
+}
+</script>
+</body>
+</html>
