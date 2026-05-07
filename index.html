@@ -36,9 +36,32 @@ header.app {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   padding: 14px 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
 }
+header.app .titleblock { flex: 1; min-width: 0; }
 header.app h1 { font-size: 18px; margin: 0; font-weight: 600; }
 header.app .sub { color: var(--muted); font-size: 12px; margin-top: 4px; max-width: 900px; }
+header.app .links {
+  display: flex;
+  gap: 14px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+header.app .links a {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+header.app .links a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+header.app .links .arrow { font-size: 10px; margin-left: 2px; }
 .layout {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -348,11 +371,18 @@ code.inline {
 </head>
 <body>
 <header class="app">
-  <h1>RBS Resolver</h1>
-  <div class="sub">
-    Visualises how the Odessa Framework's role-based security sheet resolves into a final permission for a given user, target,
-    and field. Upload your RBS workbook, pick a target, list the user's roles, and inspect the cascade.
+  <div class="titleblock">
+    <h1>RBS Resolver</h1>
+    <div class="sub">
+      Visualises how the Odessa Framework's role-based security sheet resolves into a final permission for a given user, target,
+      and field. Upload your RBS workbook, pick a target, list the user's roles, and inspect the cascade.
+    </div>
   </div>
+  <nav class="links" aria-label="Reference links">
+    <a href="./SPEC.md" target="_blank" rel="noopener" title="Open the verified algorithm spec (markdown)">Algorithm spec<span class="arrow">↗</span></a>
+    <a href="./SPEC.md" download title="Download SPEC.md">Download</a>
+    <a href="https://github.com/Odessa-DivakarM/RBSResolver" target="_blank" rel="noopener" title="View source on GitHub">GitHub<span class="arrow">↗</span></a>
+  </nav>
 </header>
 <div class="layout">
   <div class="left">
