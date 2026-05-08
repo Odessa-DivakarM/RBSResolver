@@ -266,7 +266,106 @@ isn't reachable).
 
 ---
 
-## 9. Gotchas
+## 9. What RBS does not apply to
+
+Beyond the master switch in §8, the framework has two more carve-outs that
+short-circuit RBS evaluation. Anyone debugging an RBS issue should know about
+these — they explain a lot of "why is this not honoured by my workbook?"
+moments.
+
+### 9.1 The `System.User` identity is exempt
+
+Defined in [`Lw.System/Model/UserIdentity.cs`](Lw.System/Model/UserIdentity.cs):
+
+```csharp
+public const string SystemUserLoginName = "System.User";
+...
+IsSystemUser = LoginName.Equals(SystemUserIdentity.SystemUserLoginName,
+                                StringComparison.OrdinalIgnoreCase);
+```
+
+`SecurityManager.IsAuthorizationEnabled`
+([`SecurityManager.cs`](Lw.System/Model/Security/SecurityManager.cs)) returns
+`false` whenever the current session belongs to a system user:
+
+```csharp
+if (userSession.UserIdentity == null || userSession.UserIdentity.IsSystemUser)
+    return false;
+```
+
+And every public seeker pre-filters on it:
+
+```csharp
+if (userRoles == null && !IsAuthorizationEnabled)
+    return GenericPermissionResult.PermissionResultFor(Permission.Full);
+```
+
+**Consequence.** A session running as `System.User` (case-insensitive) gets
+`Permission.Full` for every entity, transaction, and task without ever
+consulting the workbook. This is intentional — system users are the framework
+running its own internal jobs (scenarios, scheduled tasks, migrations) where
+RBS has no business gating execution.
+
+### 9.2 Actions with `Category == Helper` are excluded
+
+Defined in [`Lw.System.Metamodel/Behavior/Actions/ActionCategory.cs`](Lw.System.Metamodel/Behavior/Actions/ActionCategory.cs):
+
+```csharp
+public enum ActionCategory
+{
+    /// A Helper Action encapsulates a unit of business logic.
+    /// Other actions can make a call to such Actions.
+    Helper,
+    ...
+}
+```
+
+The securables wrapper that builds the per-entity RBS-relevant set explicitly
+excludes Helper actions
+([`EntitySecurablesWrapper.cs`](Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs)):
+
+```csharp
+var securableActions = (from action in _entity.Behavior.Actions
+    where action.Securable && action.Visible && action.Category != ActionCategory.Helper
+    select new SecurableItem(action, true) { ... }).ToHashSet();
+```
+
+The same filter is repeated in the Role Profiles report
+([`RoleProfileReportGeneratorDelegate.cs`](Lw.Domain.Base.Extension/Components/RoleProfilesReport/RoleProfileReportGeneratorDelegate.cs)):
+
+```csharp
+var actionNames = entity.Behavior.Actions
+    .Where(x => x.Securable && x.Visible && x.Category != ActionCategory.Helper)
+    .Select(x => x.Name).ToList();
+```
+
+**Consequence.** A Helper action is invisible to RBS:
+
+- It cannot appear as an operation row in the entity's permission table.
+- It is omitted from the Role Profiles report.
+- Defining a permission for it in the workbook has no effect.
+
+This is by design — Helper actions are reusable business-logic primitives
+called by other actions, not user-facing operations. Their callers carry the
+RBS rules; the helpers themselves are plumbing.
+
+### 9.3 The visualizer cannot detect either case
+
+Both exemptions are decided at the **caller** layer (session identity, action
+metadata) — neither is encoded inside the RBS workbook. The visualizer reads
+the workbook only, so it cannot warn you when:
+
+- You're modeling permissions for a flow that the running user is `System.User`
+  (the workbook value will be ignored at runtime).
+- You're trying to gate a Helper action (the operation row will be ignored
+  because Helper actions are never added to the securables set).
+
+If you suspect an RBS rule is being silently dropped at runtime, check the
+caller identity and the action's `Category` first.
+
+---
+
+## 10. Gotchas
 
 - **`X` does not mean "no opinion."** It means "fall through." If `*` is `R`
   and your role's column is `X`, you get `R`.
@@ -298,7 +397,7 @@ isn't reachable).
 
 ---
 
-## 10. Visualizer divergence
+## 11. Visualizer divergence
 
 The `index.html` resolver matches the algorithm above exactly, with one
 deliberate exception: when a workbook contains a value that
@@ -309,7 +408,7 @@ have thrown, so the divergence is never silent.
 
 ---
 
-## 11. File index
+## 12. File index
 
 | Concern                       | File                                                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -324,3 +423,5 @@ have thrown, so the divergence is never silent.
 | Strict vs lenient API         | [`Lw.System/Model/Security/PermissionResult.cs`](Lw.System/Model/Security/PermissionResult.cs)              |
 | `X` → site-level substitution | [`Lw.Domain.Base.Extension/Helpers/UserContextHelper.cs`](Lw.Domain.Base.Extension/Helpers/UserContextHelper.cs) |
 | Site-level default config     | [`Lw.WebPortal/AppSettings.config.comments`](Lw.WebPortal/AppSettings.config.comments)                      |
+| `System.User` exemption       | [`Lw.System/Model/UserIdentity.cs`](Lw.System/Model/UserIdentity.cs), [`Lw.System/Model/Security/SecurityManager.cs`](Lw.System/Model/Security/SecurityManager.cs) |
+| Helper-action exclusion       | [`Lw.System.Metamodel/Behavior/Actions/ActionCategory.cs`](Lw.System.Metamodel/Behavior/Actions/ActionCategory.cs), [`Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs`](Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs) |
