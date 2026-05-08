@@ -349,19 +349,135 @@ This is by design — Helper actions are reusable business-logic primitives
 called by other actions, not user-facing operations. Their callers carry the
 RBS rules; the helpers themselves are plumbing.
 
-### 9.3 The visualizer cannot detect either case
+### 9.3 Entities with `Securable == false`
 
-Both exemptions are decided at the **caller** layer (session identity, action
-metadata) — neither is encoded inside the RBS workbook. The visualizer reads
-the workbook only, so it cannot warn you when:
+`SeekPermission` ([`SecurityManager.cs`](Lw.System/Model/Security/SecurityManager.cs))
+short-circuits when the entity is marked non-securable in metamodel:
 
-- You're modeling permissions for a flow that the running user is `System.User`
-  (the workbook value will be ignored at runtime).
-- You're trying to gate a Helper action (the operation row will be ignored
-  because Helper actions are never added to the securables set).
+```csharp
+if (userRoles == null && (!MetaContext.Current.EntityModel.Entities[entityName].Securable
+                          || !IsAuthorizationEnabled))
+    return GenericPermissionResult.PermissionResultFor(Permission.Full);
+```
 
-If you suspect an RBS rule is being silently dropped at runtime, check the
-caller identity and the action's `Category` first.
+**Consequence.** Any entity whose metamodel has `Securable = false` returns
+`Permission.Full` for everyone, regardless of what the workbook says. The
+workbook entry is dead config. This is intentional for plumbing entities (lookup
+tables, framework-internal records) where RBS doesn't make sense.
+
+### 9.4 Things that never make it into the workbook in the first place
+
+The securables enumerator in
+[`EntitySecurablesWrapper.cs`](Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs)
+filters per-entity contributions before the workbook is even generated:
+
+| Source                     | Filter                                   |
+| -------------------------- | ---------------------------------------- |
+| Attributes                 | `attribute.Securable && attribute.Visible` |
+| References                 | `reference.Securable && reference.Visible` |
+| Computed queries           | `query.Securable && query.Visible`        |
+| Actions                    | `action.Securable && action.Visible && action.Category != Helper` |
+| Projected fields           | `projectedField.Securable`                |
+
+And tasks
+([`SecurityConfigWriter.cs`](Lw.System/Model/Security/Configuration/SecurityConfigWriter.cs)):
+
+```csharp
+var securableTasks = from task in MetaContext.Current.TaskSet.Tasks
+                     where task.Enabled
+                     select new SecurableItem(task, ...);
+```
+
+**Consequence.** Setting `Securable = false`, `Visible = false`, or
+`Enabled = false` on an item makes it invisible to RBS — defining a permission
+for it in the workbook has no runtime effect. Often surprising for hidden
+fields and disabled jobs.
+
+### 9.5 Targets not present in the workbook → user's role defaults
+
+Inside `SecurityManager.EvaluatePermission`:
+
+```csharp
+var userPermissionCache = userRoles == null
+    ? UserPermissionCache.Current
+    : new UserPermissionCache(userRoles);
+if (executor == null) return userPermissionCache.DefaultPermissionResult;
+```
+
+And `DefaultPermissionResult` is built once per user
+([`UserPermissionCache.cs`](Lw.System/Model/Security/UserPermissionCache.cs)):
+
+```csharp
+_defaultPermissionResult = GenericPermissionResult.PermissionResultFor(
+    _userRoles.Max(e => e.DefaultPermission));
+```
+
+**Consequence — and probably the most important gotcha in the whole spec.**
+RBS workbooks are not allow-lists; they are deny-lists layered on top of a
+permissive baseline. When an entity / transaction / task is **not in the
+workbook at all**, the user gets `MAX(role.DefaultPermission)` over their
+roles — which, after the `X → site-level` substitution at login (§4) with the
+default `Global.UserRole.DefaultRolePermission = F`, is typically `Full`.
+
+In other words: **the workbook adds restrictions; it does not grant access.**
+Removing a target from the workbook to "lock it down" achieves the opposite
+effect. To gate something, it must explicitly appear as a block with
+restrictive cells.
+
+### 9.6 Unauthenticated sessions
+
+`IsAuthorizationEnabled` requires authentication
+([`SecurityManager.cs`](Lw.System/Model/Security/SecurityManager.cs)):
+
+```csharp
+return Config.Instance.EnableRoleBasedAccessControl && userSession.IsAuthenticated;
+```
+
+**Consequence.** A request that arrives without an authenticated session (and
+without explicit `userRoles`) is treated like the system-user case: every
+seeker returns `Permission.Full`. RBS does not enforce against anonymous
+callers — authentication is assumed to have been enforced upstream by the
+host (web portal, API gateway, etc.). If your service surface allows
+unauthenticated calls in, RBS is not the layer that will stop them.
+
+### 9.7 Conditional (`IsDynamic`) blocks are not result-cached
+
+`PermissionTable.IsDynamic` is `true` whenever the block has any condition
+rows. Two side effects of that:
+
+```csharp
+// PermissionResultBuilder.cs
+return new PermissionResult(..., cacheable: !_permissionTable.IsDynamic);
+
+// PermissionTableExecutor.cs
+if (_permissionTable.IsDynamic && model == null)
+    throw new ArgumentNullException("model");
+```
+
+**Consequence.** A conditional block re-evaluates for every entity instance;
+its result never lands in `UserPermissionCache`. And it cannot be evaluated
+without an entity instance (`model`) — block-level lookups against a dynamic
+table will throw. The visualizer always passes a synthetic `entityState`, so
+this manifests in production as `ArgumentNullException` when caller code
+forgets to pass the entity.
+
+### 9.8 The visualizer cannot detect any of these
+
+All of the above are decided at the **caller** or **metamodel** layer, not in
+the workbook itself. The visualizer reads the workbook only, so it cannot
+warn when:
+
+- The runtime user is `System.User` or unauthenticated (§9.1, §9.6).
+- The action being gated has `Category == Helper` (§9.2).
+- The entity is `Securable == false` in metamodel (§9.3).
+- Fields, references, queries, or tasks were filtered out by `Securable` /
+  `Visible` / `Enabled` flags before workbook generation (§9.4).
+- The entity / transaction / task is missing from the workbook entirely
+  (§9.5) — the user gets their role default permission at runtime, which is
+  typically `Full`.
+
+If you suspect an RBS rule is being silently dropped at runtime, walk this
+list before assuming the workbook is at fault.
 
 ---
 
@@ -425,3 +541,7 @@ have thrown, so the divergence is never silent.
 | Site-level default config     | [`Lw.WebPortal/AppSettings.config.comments`](Lw.WebPortal/AppSettings.config.comments)                      |
 | `System.User` exemption       | [`Lw.System/Model/UserIdentity.cs`](Lw.System/Model/UserIdentity.cs), [`Lw.System/Model/Security/SecurityManager.cs`](Lw.System/Model/Security/SecurityManager.cs) |
 | Helper-action exclusion       | [`Lw.System.Metamodel/Behavior/Actions/ActionCategory.cs`](Lw.System.Metamodel/Behavior/Actions/ActionCategory.cs), [`Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs`](Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs) |
+| Securable / Visible filters   | [`Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs`](Lw.System/Model/Security/Configuration/EntitySecurablesWrapper.cs)                          |
+| Disabled-task exclusion       | [`Lw.System/Model/Security/Configuration/SecurityConfigWriter.cs`](Lw.System/Model/Security/Configuration/SecurityConfigWriter.cs)                                |
+| Default-grant on missing target | [`Lw.System/Model/Security/UserPermissionCache.cs`](Lw.System/Model/Security/UserPermissionCache.cs)                                                              |
+| `IsDynamic` cache & model gating | [`Lw.System/Model/Security/PermissionTable.cs`](Lw.System/Model/Security/PermissionTable.cs), [`Lw.System/Model/Security/PermissionTableExecutor.cs`](Lw.System/Model/Security/PermissionTableExecutor.cs) |
