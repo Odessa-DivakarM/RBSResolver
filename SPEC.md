@@ -4,7 +4,7 @@ This document describes how the Odessa.Framework's RBS sheet resolves into a
 final permission for a given user, target, and field. Every claim has been
 verified against the framework source; relevant files are linked inline.
 
-The visualizer in `index.html` implements this exact algorithm, with one
+The **RBS Resolver** app implements this exact algorithm, with one
 intentional divergence noted at the end.
 
 ---
@@ -529,7 +529,7 @@ list before assuming the workbook is at fault.
 
 ## 11. Visualizer divergence
 
-The `index.html` resolver matches the algorithm above exactly, with one
+The **RBS Resolver** app matches the algorithm above exactly, with one
 deliberate exception: when a workbook contains a value that
 `Permission.Parse` or `Bool3.Parse` would reject, the visualizer warns and
 coerces to `X` so exploration can continue. Production halts with a
