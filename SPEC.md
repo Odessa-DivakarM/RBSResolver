@@ -268,10 +268,24 @@ isn't reachable).
 
 ## 9. What RBS does not apply to
 
-Beyond the master switch in §8, the framework has two more carve-outs that
-short-circuit RBS evaluation. Anyone debugging an RBS issue should know about
-these — they explain a lot of "why is this not honoured by my workbook?"
-moments.
+Beyond the master switch in §8, the framework has **seven more carve-outs**
+that either short-circuit RBS evaluation or quietly remove items from the
+workbook before evaluation can ever consider them. Anyone debugging an RBS
+issue should know about these — they explain most "why is this not honoured
+by my workbook?" moments.
+
+At-a-glance:
+
+| § | Carve-out | Layer |
+| - | --------- | ----- |
+| 9.1 | `System.User` identity | session |
+| 9.2 | Actions with `Category == Helper` | metamodel |
+| 9.3 | Entities with `Securable == false` | metamodel |
+| 9.4 | `Securable` / `Visible` / `Enabled` filters on attrs, refs, queries, actions, tasks | metamodel |
+| 9.5 | Target not present in the workbook → `MAX(role.DefaultPermission)` | runtime |
+| 9.6 | Unauthenticated sessions | session |
+| 9.7 | `IsDynamic` (conditional) blocks — caching and `model` requirements | runtime |
+| 9.8 | The visualizer cannot detect any of these | (note) |
 
 ### 9.1 The `System.User` identity is exempt
 
