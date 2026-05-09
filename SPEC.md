@@ -105,7 +105,7 @@ but workbooks use `Y` / `N` / `X` / blank. The parser does the translation.
 Configured by the global parameter `UserRole.DefaultRolePermission` (default
 `Full`, see [`Lw.WebPortal/AppSettings.config.comments`](Lw.WebPortal/AppSettings.config.comments)).
 
-At **login time**, `UserContextHelper.PrepareUserRoles` rewrites every role
+At **login time**, `UserContextHelper.FetchUserRoles` rewrites every role
 whose stored `DefaultPermission` is `X` to this site-level value before any
 cascade can run:
 
@@ -253,7 +253,7 @@ isn't reachable).
 - **At login**: `SecurityService.LoginUser` calls
   `LoadActiveConfiguration()` → reloads `SecurityManager._executorCache` from
   the active RBS file in the DB if its `SystemConfigFileId` differs.
-  `UserContextHelper.PrepareUserRoles` builds the user's `IUserRole` list and
+  `UserContextHelper.FetchUserRoles` builds the user's `IUserRole` list and
   performs the `X → site-level` substitution.
 - **At request time**: `SecurityManager.SeekEntityPermission()` /
   `SeekTransactionPermission()` / `SeekTaskPermission()` consult
