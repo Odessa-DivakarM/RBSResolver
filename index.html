@@ -1796,12 +1796,30 @@ function buildDemoWorkbook() {
 
   const transactions = [
     makeBlock('PostInvoice', 'Post invoice',
-      ['*', 'Account Manager'],
-      ['X', 'F'], []
+      ['*', 'Account Manager', 'Sales Manager'],
+      ['N', 'F', 'X'],
+      [
+        { name: 'Create',                      values: ['N', 'F', 'X'] },
+        { name: 'BrowseForm.PostInvoiceBrowse', values: ['X', 'X', 'X'] }
+      ]
     ),
     makeBlock('VoidInvoice', 'Void invoice',
       ['*', 'Account Manager', 'Sales Manager'],
-      ['N', 'F', 'X'], []
+      ['N', 'F', 'N'],
+      [
+        { name: 'Create', values: ['N', 'F', 'N'] },
+        { name: 'Edit',   values: ['N', 'F', 'N'] }
+      ]
+    ),
+    makeBlock('Receipt', 'Receipt',
+      ['*', 'Account Manager', 'Sales Manager'],
+      ['F', 'F', 'X'],
+      [
+        { name: 'Create',                  values: ['F', 'F', 'X'] },
+        { name: 'Edit',                    values: ['F', 'F', 'X'] },
+        { name: 'BrowseForm.ReceiptBrowse', values: ['F', 'F', 'X'] },
+        { name: 'Reverse',                 values: ['N', 'F', 'N'] }
+      ]
     )
   ];
 
