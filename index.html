@@ -488,12 +488,12 @@ code.inline {
 
     <div class="panel">
       <h2>Step 1 &middot; Load the security spreadsheet</h2>
-      <label class="dropzone" id="dropzone">
+      <label class="dropzone" id="dropzone" title="Click to browse for your RBS .xlsx workbook, or drag and drop it here">
         <input type="file" id="file" accept=".xlsx,.xls">
         <div id="dropMsg"><strong>Drop .xlsx here</strong> or click to browse</div>
       </label>
       <div style="margin-top:10px; display:flex; gap:8px;">
-        <button class="secondary" id="loadDemo" style="flex:1;">Load demo workbook</button>
+        <button class="secondary" id="loadDemo" style="flex:1;" title="Load a built-in sample workbook to explore the tool without uploading your own file">Load demo workbook</button>
       </div>
     </div>
     <div class="panel" id="queryPanel" style="display:none;">
@@ -997,6 +997,7 @@ function handleFile(f) {
       const wb = XLSX.read(data, { type: 'array' });
       parsed = parseWorkbook(wb);
       $('dropMsg').innerHTML = `<strong>Loaded:</strong> ${escapeHtml(f.name)}`;
+      $('dropzone').title = `Loaded: ${f.name}. Click or drag-drop to load a different file.`;
       onLoaded();
     } catch (err) {
       $('dropMsg').textContent = 'Failed to read file: ' + err.message;
@@ -1008,6 +1009,7 @@ function handleFile(f) {
 $('loadDemo').addEventListener('click', () => {
   parsed = buildDemoWorkbook();
   $('dropMsg').innerHTML = '<strong>Loaded:</strong> built-in demo';
+  $('dropzone').title = 'Using the built-in demo workbook. Click or drag-drop to load your own .xlsx.';
   onLoaded();
 });
 
