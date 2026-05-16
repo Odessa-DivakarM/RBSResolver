@@ -20,7 +20,7 @@
 $server   = 'LWPRODAPP-009'
 $sitePath = 'E:\Sites\RBSResolver'
 $appPool  = 'RBSResolver'
-$baseUrl  = 'http://rbsresolver.s009.odessacore.local'   # <- verify / adjust if different
+$baseUrl  = 'http://rbsresolver.s009.odessacore.local'
 
 $sourceDir    = (Resolve-Path "$PSScriptRoot\..").Path
 $uncPath      = "\\$server\$($sitePath -replace '^([A-Za-z]):', '$1$')"
