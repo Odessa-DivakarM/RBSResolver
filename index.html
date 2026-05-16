@@ -1492,7 +1492,7 @@ function buildSheetPanel(block, operationName, t) {
     panel.innerHTML = `<h2>Rules checked in the spreadsheet &mdash; ${escapeHtml(block.identifier)}</h2>`;
     const caption = document.createElement('p');
     caption.style.cssText = 'font-size:12px; color:var(--muted); margin:0 0 10px;';
-    caption.innerHTML = '<strong>Dashed border</strong> = a cell the system read but moved past. <strong>Solid border with triangle</strong> = where it found the answer and stopped. Strikethrough columns were filtered out by record properties.';
+    caption.innerHTML = '<strong>Dashed border</strong> = a cell the system read but moved past. <strong>Bold solid border</strong> = where it found the answer and stopped. Strikethrough columns were filtered out by record properties.';
     panel.appendChild(caption);
   } else {
     panel.innerHTML = `<h2>Block &middot; ${escapeHtml(block.identifier)}${operationName ? ` &middot; operation: ${escapeHtml(operationName)}` : ' &middot; block-level'}</h2>`;
