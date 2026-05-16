@@ -32,7 +32,7 @@ Write-Host "[pre-flight] Checking source files in: $sourceDir" -ForegroundColor 
 foreach ($file in $releaseFiles) {
     $fullPath = "$sourceDir\$file"
     if (-not (Test-Path $fullPath)) {
-        throw "Source file not found: $fullPath — aborting before touching the server."
+        throw "Source file not found: $fullPath - aborting before touching the server."
     }
     Write-Host "             $file  OK" -ForegroundColor Gray
 }
@@ -95,7 +95,7 @@ while ((Get-Date) -lt $deadline) {
 
 Write-Host ""
 if ($ok) {
-    Write-Host "[prod] Deployment complete — site is up at $baseUrl" -ForegroundColor Green
+    Write-Host "[prod] Deployment complete - site is up at $baseUrl" -ForegroundColor Green
 } else {
     Write-Warning "[prod] Site did not return HTTP 200 within 30 s. Check $baseUrl manually."
 }
