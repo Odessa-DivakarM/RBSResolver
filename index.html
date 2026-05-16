@@ -1197,8 +1197,11 @@ function easyBannerText(raw) {
     return 'The spreadsheet contains some unexpected values. They\'ve been treated as "not set" (X).';
   if (raw.startsWith('Site-level substitution'))
     return 'One or more roles had no default permission set, so the system used your system fallback value.';
-  if (raw.startsWith('Role "'))
-    return raw.replace(/^Role "(.*?)" is not.*$/, 'The role name "<strong>$1</strong>" wasn\'t found in the spreadsheet &mdash; check the spelling.');
+  if (raw.startsWith('Role "')) {
+    const m = raw.match(/^Role "(.*?)" is not/);
+    const name = m ? escapeHtml(m[1]) : 'unknown';
+    return `The role name "<strong>${name}</strong>" wasn't found in the spreadsheet &mdash; check the spelling.`;
+  }
   return raw;
 }
 
@@ -1206,8 +1209,13 @@ function buildEasyVerdict(t) {
   const fn = PERM_NAME[t.final];
   if (t.shortCircuit)
     return `Access was immediately set to <strong>Full</strong> &mdash; a role with maximum access was found before any spreadsheet cells needed to be read.`;
-  if (t.groupA.length === 0)
+  if (t.groupA.length === 0) {
+    const catchAllResult = t.roleBasedPerm || 'X';
+    if (t.groupB.length > 0 && PERM_RANK[t.unconfiguredPerm] > PERM_RANK[catchAllResult]) {
+      return `The catch-all rule gave <strong>${PERM_NAME[catchAllResult]}</strong>, but the user also has ${t.groupB.length} role(s) not configured in this block — their default access raised the final result to <strong>${fn}</strong>.`;
+    }
     return `No specific rules were found for the user's roles in this record type. The system used the catch-all rule, which gives <strong>${fn}</strong>.`;
+  }
   const roles = t.groupA.map(r => `<em>${escapeHtml(r.role)}</em>`).join(', ');
   if (t.groupB.length === 0)
     return `The system checked the rules for ${roles} and resolved to <strong>${fn}</strong>.`;
