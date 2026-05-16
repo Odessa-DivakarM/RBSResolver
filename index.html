@@ -265,15 +265,26 @@ table.sheet td.row-name {
   position: relative;
 }
 .cell-stop::after {
-  content: '';
+  content: attr(data-step);
   position: absolute;
-  top: 0;
-  right: 0;
-  width: 0;
-  height: 0;
-  border-style: solid;
-  border-width: 0 9px 9px 0;
-  border-color: transparent var(--accent) transparent transparent;
+  top: 2px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  pointer-events: none;
+}
+.cell-read:not(.cell-stop)::after {
+  content: attr(data-step);
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0.6;
+  line-height: 1;
   pointer-events: none;
 }
 /* The two states can co-exist on a single cell (the "stop" cell is
@@ -765,6 +776,7 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
     common: null,
     readCells: new Set(),
     stopCells: new Set(),
+    stepNumbers: new Map(),
     unconfiguredPerm: 'X',
     shortCircuit: false,
     operationName,
@@ -839,7 +851,7 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
     cascadeTargets.push({ roleColumn: rc, userRole });
   }
 
-  const recordRead = (rowKey, key) => trace.readCells.add(rowKey + '|' + key);
+  const recordRead = (rowKey, key, n) => { trace.readCells.add(rowKey + '|' + key); if (n != null) trace.stepNumbers.set(rowKey + '|' + key, n); };
   const recordStop = (rowKey, key) => trace.stopCells.add(rowKey + '|' + key);
 
   let roleBasedPerm = null;
@@ -879,11 +891,11 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
       const starLabel = starCount > 1 ? `*[col${starIdx}]` : '*';
       if (opRow) {
         commonPerm = opRow.values[starIdx];
-        recordRead('op', starKey);
+        recordRead('op', starKey, 1);
         steps.push({ desc: `${operationName} × ${starLabel}`, value: commonPerm, stop: commonPerm !== 'X', cell: { row: 'op', col: starKey } });
         if (commonPerm === 'X') {
           commonPerm = (block.permissions || [])[starIdx] || 'X';
-          recordRead('perm', starKey);
+          recordRead('perm', starKey, 2);
           steps.push({ desc: `Permissions × ${starLabel}`, value: commonPerm, stop: true, cell: { row: 'perm', col: starKey } });
           recordStop('perm', starKey);
         } else {
@@ -891,7 +903,7 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
         }
       } else {
         commonPerm = (block.permissions || [])[starIdx] || 'X';
-        recordRead('perm', starKey);
+        recordRead('perm', starKey, 1);
         steps.push({ desc: `Permissions × ${starLabel}`, value: commonPerm, stop: true, cell: { row: 'perm', col: starKey } });
         recordStop('perm', starKey);
       }
@@ -919,7 +931,7 @@ function cascadeForColumn(block, userRole, roleColumn, opRow, operationName, sta
   const starLabel = ambiguousStar ? `*[col${starIdx}]` : '*';
 
   const probe = (n, rowKey, key, value, label) => {
-    recordRead(rowKey, key);
+    recordRead(rowKey, key, n);
     const stop = value !== 'X';
     steps.push({ n, desc: label, value, stop, cell: { row: rowKey, col: key } });
     if (stop) recordStop(rowKey, key);
@@ -1446,6 +1458,7 @@ function buildSheetPanel(block, operationName, t) {
 function buildSheetTable(block, operationName, t) {
   const readSet = t ? t.readCells : new Set();
   const stopSet = t ? t.stopCells : new Set();
+  const stepMap = (t && t.stepNumbers) ? t.stepNumbers : new Map();
   const unmatched = new Set((t && t.unmatchedColumns || []).map(c => c.columnIndex));
   const tbl = document.createElement('table'); tbl.className = 'sheet';
   const thead = document.createElement('thead'); const trh = document.createElement('tr');
@@ -1490,6 +1503,7 @@ function buildSheetTable(block, operationName, t) {
       const key = 'perm|col' + rc.columnIndex;
       if (readSet.has(key)) td.classList.add('cell-read');
       if (stopSet.has(key)) td.classList.add('cell-stop');
+      const sn = stepMap.get(key); if (sn != null) td.dataset.step = sn;
       td.textContent = v;
       tr.appendChild(td);
     }
@@ -1511,6 +1525,7 @@ function buildSheetTable(block, operationName, t) {
         const key = 'op|col' + rc.columnIndex;
         if (readSet.has(key)) td.classList.add('cell-read');
         if (stopSet.has(key)) td.classList.add('cell-stop');
+        const sn = stepMap.get(key); if (sn != null) td.dataset.step = sn;
       }
       tr.appendChild(td);
     }
