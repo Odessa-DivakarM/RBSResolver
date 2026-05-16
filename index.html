@@ -1215,13 +1215,14 @@ function stepSentence(stepN, roleName, opName, value, stopped) {
   const verdict = stopped
     ? ` &rarr; ${chip}. That's a real answer, so the system stops here.`
     : ` &rarr; X (not set). No rule here, keep looking.`;
+  const prefix = `<span style="font-size:11px; font-weight:600; color:var(--muted); margin-right:4px;">Step ${stepN} of 5 &mdash;</span>`;
   switch (stepN) {
-    case 1: return `Checked the rule for ${role} on ${op}${verdict}`;
-    case 2: return `Checked the catch-all rule for ${op}${verdict}`;
-    case 3: return `Checked the general record-level rule for ${role}${verdict}`;
-    case 4: return `Checked the catch-all record-level rule${verdict}`;
-    case 5: return `Used ${role}'s default access level from the database${verdict}`;
-    default: return `Step ${stepN}${verdict}`;
+    case 1: return `${prefix}Checked the rule for ${role} on ${op}${verdict}`;
+    case 2: return `${prefix}Checked the catch-all rule for ${op}${verdict}`;
+    case 3: return `${prefix}Checked the general record-level rule for ${role}${verdict}`;
+    case 4: return `${prefix}Checked the catch-all record-level rule${verdict}`;
+    case 5: return `${prefix}Used ${role}'s default access level from the database${verdict}`;
+    default: return `${prefix}${verdict}`;
   }
 }
 
