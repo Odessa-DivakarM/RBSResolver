@@ -77,9 +77,9 @@ header.app .links .arrow { font-size: 10px; margin-left: 2px; }
 }
 .panel + .panel { margin-top: 16px; }
 .panel h2 {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--muted);
   margin: 0 0 12px;
   font-weight: 600;
@@ -103,12 +103,12 @@ header.app .links .arrow { font-size: 10px; margin-left: 2px; }
 .field { margin-bottom: 10px; }
 .field label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-bottom: 4px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .field select, .field input[type="text"] {
   width: 100%;
@@ -396,18 +396,6 @@ code.inline {
 }
 .muted-note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
 
-/* ── Easy / Normal mode visibility ───────────────────────── */
-.easy-only  { display: none; }
-.normal-only { display: inherit; }
-body.easy-mode .easy-only  { display: inherit; }
-body.easy-mode .normal-only { display: none; }
-
-/* ── Mode toggle button ───────────────────────────────────── */
-.mode-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; align-self: center; }
-.mode-btn { background: white; border: none; padding: 4px 12px; font: inherit; font-size: 12px; cursor: pointer; color: var(--muted); }
-.mode-btn.active { background: var(--accent); color: white; }
-.mode-btn:hover:not(.active) { background: #eff6ff; color: var(--accent); }
-
 /* ── Tooltip (pure CSS, ? trigger) ───────────────────────── */
 .tip { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#eff6ff; color:var(--accent); font-size:10px; font-weight:700; cursor:help; position:relative; vertical-align:middle; margin-left:4px; border:1px solid #bfdbfe; flex-shrink:0; }
 .tip::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); background:#1e293b; color:white; padding:6px 10px; border-radius:6px; font-size:12px; width:230px; white-space:normal; opacity:0; transition:opacity .15s; z-index:100; pointer-events:none; line-height:1.5; text-align:left; box-shadow:0 4px 12px rgba(0,0,0,.2); }
@@ -441,9 +429,7 @@ body.easy-mode .normal-only { display: none; }
 .story-outcome { margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
 .perm-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; }
 
-/* ── Easy-mode label overrides ────────────────────────────── */
-body.easy-mode .field label { text-transform: none; letter-spacing: 0; font-size: 12px; }
-body.easy-mode .panel h2 { text-transform: none; letter-spacing: 0; font-size: 13px; }
+
 </style>
 </head>
 <body>
@@ -457,17 +443,13 @@ body.easy-mode .panel h2 { text-transform: none; letter-spacing: 0; font-size: 1
   </div>
   <nav class="links" aria-label="Reference links">
     <a href="./SPEC.html" target="_blank" rel="noopener" title="Open the verified algorithm spec, rendered as HTML">Algorithm spec<span class="arrow">↗</span></a>
-    <div class="mode-toggle" role="group" aria-label="Display mode">
-      <button class="mode-btn" id="modeEasy" onclick="setEasyMode(true)">Easy</button>
-      <button class="mode-btn" id="modeNormal" onclick="setEasyMode(false)">Normal</button>
-    </div>
   </nav>
 </header>
 <div class="layout">
   <div class="left">
 
     <!-- EASY MODE: onboarding banner -->
-    <div class="onboarding-banner easy-only" id="onboardingBanner">
+    <div class="onboarding-banner" id="onboardingBanner">
       <button class="dismiss" onclick="dismissOnboarding()" title="Dismiss">&#x2715;</button>
       <h3>What does this tool do?</h3>
       <p>This tool answers one question: <strong>what can a specific user do on a specific record?</strong> Upload the security spreadsheet for your Odessa system (or use the demo), tell us who the user is and what you're checking — and we'll show you the answer in plain English.</p>
@@ -475,7 +457,7 @@ body.easy-mode .panel h2 { text-transform: none; letter-spacing: 0; font-size: 1
     </div>
 
     <!-- EASY MODE: glossary -->
-    <details class="panel glossary-panel easy-only">
+    <details class="panel glossary-panel">
       <summary>Glossary &mdash; what do these terms mean?</summary>
       <dl class="glossary-body">
         <dt>F &mdash; Full</dt><dd>The user can see, edit, and do everything on this record.</dd>
@@ -493,10 +475,7 @@ body.easy-mode .panel h2 { text-transform: none; letter-spacing: 0; font-size: 1
     </details>
 
     <div class="panel">
-      <h2>
-        <span class="normal-only">Step 1 &middot; workbook</span>
-        <span class="easy-only">Step 1 &middot; Load the security spreadsheet</span>
-      </h2>
+      <h2>Step 1 &middot; Load the security spreadsheet</h2>
       <label class="dropzone" id="dropzone">
         <input type="file" id="file" accept=".xlsx,.xls">
         <div id="dropMsg"><strong>Drop .xlsx here</strong> or click to browse</div>
@@ -506,38 +485,23 @@ body.easy-mode .panel h2 { text-transform: none; letter-spacing: 0; font-size: 1
       </div>
     </div>
     <div class="panel" id="queryPanel" style="display:none;">
-      <h2>
-        <span class="normal-only">Step 2 &middot; query target</span>
-        <span class="easy-only">Step 2 &middot; What are you checking?</span>
-      </h2>
+      <h2>Step 2 &middot; What are you checking?</h2>
       <div class="tabs" id="tabs"></div>
       <div class="field">
-        <label>
-          <span class="normal-only">Block</span>
-          <span class="easy-only">Record type<span class="tip" tabindex="0" data-tip="A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.">?</span></span>
-        </label>
+        <label>Record type<span class="tip" tabindex="0" data-tip="A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.">?</span></label>
         <select id="block"></select>
       </div>
       <div class="field">
-        <label>
-          <span class="normal-only">Operation (optional)</span>
-          <span class="easy-only">Specific action or field (optional)<span class="tip" tabindex="0" data-tip="A specific field or action on the record — e.g. Amount, ApprovedBy. Leave blank to check access to the record itself.">?</span></span>
-        </label>
+        <label>Specific action or field (optional)<span class="tip" tabindex="0" data-tip="A specific field or action on the record — e.g. Amount, ApprovedBy. Leave blank to check access to the record itself.">?</span></label>
         <select id="operation">
           <option value="">&mdash; entity-level &mdash;</option>
         </select>
       </div>
     </div>
     <div class="panel" id="rolesPanel" style="display:none;">
-      <h2>
-        <span class="normal-only">Step 3 &middot; user roles</span>
-        <span class="easy-only">Step 3 &middot; Who is the user?</span>
-      </h2>
+      <h2>Step 3 &middot; Who is the user?</h2>
       <div class="field">
-        <label>
-          <span class="normal-only">Site-level default <span style="text-transform:none; letter-spacing:0; font-weight:400;">(<code class="inline">Global.UserRole.DefaultRolePermission</code>)</span></span>
-          <span class="easy-only">System fallback permission<span class="tip" tabindex="0" data-tip="If a role has no default permission set, the system uses this value instead. Usually Full. Matches the Global.UserRole.DefaultRolePermission setting in your Odessa config.">?</span></span>
-        </label>
+        <label>System fallback permission<span class="tip" tabindex="0" data-tip="If a role has no default permission set, the system uses this value instead. Usually Full. Matches the Global.UserRole.DefaultRolePermission setting in your Odessa config.">?</span></label>
         <select id="siteLevelDefault">
           <option value="F" selected>F &mdash; Full</option>
           <option value="M">M &mdash; Modify</option>
@@ -547,24 +511,16 @@ body.easy-mode .panel h2 { text-transform: none; letter-spacing: 0; font-size: 1
       </div>
       <div id="roleList"></div>
       <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
-      <p class="muted-note normal-only">DefaultPermission is the value that role carries on the master <code class="inline">Roles</code> entity in the database. If it is <code class="inline">X</code>, the framework substitutes the site-level default at login time (<a href="#" id="showXNote" style="color:var(--accent);">why?</a>).</p>
-      <p class="muted-note easy-only">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the system fallback permission you chose above.</p>
-      <div id="xNote" style="display:none; font-size:12px; color:var(--muted); margin-top:6px; padding:8px 10px; background:#f8fafc; border:1px solid var(--border); border-radius:4px;">
-        <code class="inline">UserContextHelper.cs</code> reads <code class="inline">Global.UserRole.DefaultRolePermission</code> when building the user's role list. Any role whose stored DefaultPermission is <code class="inline">X</code> is rewritten to that site-level value before the cascade ever runs &mdash; so step&nbsp;5 in production never sees <code class="inline">X</code>.
-      </div>
+      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the system fallback permission you chose above.</p>
     </div>
     <div class="panel" id="conditionsPanel" style="display:none;">
-      <h2>
-        <span class="normal-only">Step 4 &middot; entity condition values</span>
-        <span class="easy-only">Step 4 &middot; Record properties</span>
-      </h2>
-      <p class="muted-note normal-only" style="margin-top:0;">Conditional RBS columns only match when the entity's actual condition values agree. Set each to <code class="inline">T</code> or <code class="inline">F</code> to simulate. Unset values cannot satisfy a <code class="inline">T</code>/<code class="inline">F</code> demand and will filter that column out.</p>
-      <p class="muted-note easy-only" style="margin-top:0;">Some permission rules only apply when the record has specific properties. Set each property below to simulate a real record.</p>
+      <h2>Step 4 &middot; Record properties</h2>
+      <p class="muted-note" style="margin-top:0;">Some permission rules only apply when the record has specific properties. Set each property below to simulate a real record.</p>
       <div id="conditionList"></div>
     </div>
     <div class="panel" id="actionPanel" style="display:none;">
       <button class="primary" id="evaluate">Evaluate permission</button>
-      <button class="secondary normal-only" id="runTests" style="margin-top:8px; width:100%;">Run sanity tests</button>
+      <div style="text-align:center; margin-top:10px;"><a href="#" id="runTests" style="font-size:11px; color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--muted);">Run algorithm tests</a></div>
     </div>
   </div>
   <div class="right">
@@ -1002,10 +958,6 @@ let currentBlock = null;
 let siteLevelDefault = 'F';
 const userRoles = [];
 let entityState = {}; // { conditionName: 'T' | 'F' | undefined }
-let easyMode = false;
-let lastTrace = null;
-let lastBlock = null;
-let lastOpName = null;
 
 // ============================================================
 // UI wiring
@@ -1198,28 +1150,11 @@ function runEvaluate() {
   if (!currentBlock) return;
   const opName = $('operation').value || null;
   const trace = evaluate(currentBlock, opName, userRoles, siteLevelDefault, entityState);
-  lastTrace = trace; lastBlock = currentBlock; lastOpName = opName;
   renderResults(currentBlock, opName, trace);
 }
 
 const siteSel = $('siteLevelDefault');
 if (siteSel) siteSel.addEventListener('change', e => { siteLevelDefault = e.target.value; });
-const xNoteLink = $('showXNote');
-if (xNoteLink) xNoteLink.addEventListener('click', e => {
-  e.preventDefault();
-  const n = $('xNote');
-  n.style.display = n.style.display === 'none' ? '' : 'none';
-});
-
-function setEasyMode(val) {
-  easyMode = val;
-  document.body.classList.toggle('easy-mode', val);
-  localStorage.setItem('rbsEasyMode', val ? '1' : '0');
-  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById(val ? 'modeEasy' : 'modeNormal');
-  if (btn) btn.classList.add('active');
-  if (lastTrace && lastBlock) renderResults(lastBlock, lastOpName, lastTrace);
-}
 
 function dismissOnboarding() {
   localStorage.setItem('rbsOnboardingDismissed', '1');
@@ -1427,8 +1362,7 @@ function renderResults(block, operationName, t) {
   }
   for (const b of banners) {
     const el = document.createElement('div'); el.className = 'banner';
-    if (easyMode) el.innerHTML = easyBannerText(b);
-    else el.textContent = b;
+    el.innerHTML = easyBannerText(b);
     out.appendChild(el);
   }
 
@@ -1454,12 +1388,13 @@ function buildFinalCard(t) {
   card.appendChild(badge);
   const info = document.createElement('div');
   info.className = 'final-info';
-  const formulaOrVerdict = easyMode
-    ? `<p style="font-size:13px; color:var(--muted); margin:4px 0 8px;">${buildEasyVerdict(t)}</p>`
-    : `<div class="formula">${makeFormula(t)}</div>`;
   info.innerHTML = `
     <h3>${PERM_NAME[t.final]}${t.final === 'X' ? ' &mdash; effectively None' : ''}</h3>
-    ${formulaOrVerdict}
+    <p style="font-size:13px; color:var(--muted); margin:4px 0 6px;">${buildEasyVerdict(t)}</p>
+    <details style="margin:0 0 8px;">
+      <summary style="font-size:11px; color:var(--muted); cursor:pointer;">Show calculation</summary>
+      <div class="formula" style="margin-top:6px;">${makeFormula(t)}</div>
+    </details>
     <div class="ux">${UX_EFFECT[t.final]}</div>`;
   card.appendChild(info);
   return card;
@@ -1488,15 +1423,11 @@ function makeFormula(t) {
 function buildSheetPanel(block, operationName, t) {
   const panel = document.createElement('div');
   panel.className = 'panel';
-  if (easyMode) {
-    panel.innerHTML = `<h2>Rules checked in the spreadsheet &mdash; ${escapeHtml(block.identifier)}</h2>`;
-    const caption = document.createElement('p');
-    caption.style.cssText = 'font-size:12px; color:var(--muted); margin:0 0 10px;';
-    caption.innerHTML = '<strong>Dashed border</strong> = a cell the system read but moved past. <strong>Bold solid border</strong> = where it found the answer and stopped. Strikethrough columns were filtered out by record properties.';
-    panel.appendChild(caption);
-  } else {
-    panel.innerHTML = `<h2>Block &middot; ${escapeHtml(block.identifier)}${operationName ? ` &middot; operation: ${escapeHtml(operationName)}` : ' &middot; block-level'}</h2>`;
-  }
+  panel.innerHTML = `<h2>Rules checked in the spreadsheet &mdash; ${escapeHtml(block.identifier)}</h2>`;
+  const caption = document.createElement('p');
+  caption.style.cssText = 'font-size:12px; color:var(--muted); margin:0 0 10px;';
+  caption.innerHTML = '<strong>Dashed border</strong> = a cell the system read but moved past. <strong>Bold solid border</strong> = where it found the answer and stopped. Strikethrough columns were filtered out by record properties.';
+  panel.appendChild(caption);
   const legend = document.createElement('div');
   legend.className = 'legend';
   legend.innerHTML =
@@ -1638,24 +1569,19 @@ function buildTracePanel(t) {
   const panel = document.createElement('div');
   panel.className = 'panel';
 
-  if (easyMode) {
-    panel.innerHTML = '<h2>How was this decided?</h2>';
-    panel.appendChild(buildNarrativeTrace(t));
-    const det = document.createElement('details');
-    det.className = 'steps-key';
-    det.style.marginTop = '12px';
-    const sum = document.createElement('summary');
-    sum.textContent = 'Show technical details';
-    det.appendChild(sum);
-    const techWrap = document.createElement('div');
-    techWrap.className = 'key-body';
-    buildTechnicalTrace(techWrap, t);
-    det.appendChild(techWrap);
-    panel.appendChild(det);
-  } else {
-    panel.innerHTML = '<h2>Resolution trace</h2>';
-    buildTechnicalTrace(panel, t);
-  }
+  panel.innerHTML = '<h2>How was this decided?</h2>';
+  panel.appendChild(buildNarrativeTrace(t));
+  const det = document.createElement('details');
+  det.className = 'steps-key';
+  det.style.marginTop = '12px';
+  const sum = document.createElement('summary');
+  sum.textContent = 'Show technical details';
+  det.appendChild(sum);
+  const techWrap = document.createElement('div');
+  techWrap.className = 'key-body';
+  buildTechnicalTrace(techWrap, t);
+  det.appendChild(techWrap);
+  panel.appendChild(det);
   return panel;
 }
 
@@ -1869,7 +1795,7 @@ function buildDemoWorkbook() {
 // ============================================================
 // Sanity tests
 // ============================================================
-$('runTests').addEventListener('click', runTests);
+$('runTests').addEventListener('click', e => { e.preventDefault(); runTests(); });
 function runTests() {
   const out = $('output');
   out.innerHTML = '';
@@ -2073,14 +1999,10 @@ function runTests() {
   out.appendChild(panel);
 }
 
-(function () {
-  const saved = localStorage.getItem('rbsEasyMode');
-  setEasyMode(saved === null ? true : saved === '1');
-  if (easyMode && localStorage.getItem('rbsOnboardingDismissed') === '1') {
-    const b = document.getElementById('onboardingBanner');
-    if (b) b.style.display = 'none';
-  }
-})();
+if (localStorage.getItem('rbsOnboardingDismissed') === '1') {
+  const b = document.getElementById('onboardingBanner');
+  if (b) b.style.display = 'none';
+}
 </script>
 </body>
 </html>
