@@ -314,7 +314,7 @@ if (userRoles == null && !IsAuthorizationEnabled)
     return GenericPermissionResult.PermissionResultFor(Permission.Full);
 ```
 
-**Consequence.** A session running as `System.User` (case-insensitive) gets
+**Consequence.** A session or login running as `System.User` (case-insensitive) gets
 `Permission.Full` for every entity, transaction, and task without ever
 consulting the workbook. This is intentional — system users are the framework
 running its own internal jobs (scenarios, scheduled tasks, migrations) where
