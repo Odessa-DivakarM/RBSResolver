@@ -77,9 +77,9 @@ header.app .links .arrow { font-size: 10px; margin-left: 2px; }
 }
 .panel + .panel { margin-top: 16px; }
 .panel h2 {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--muted);
   margin: 0 0 12px;
   font-weight: 600;
@@ -103,12 +103,12 @@ header.app .links .arrow { font-size: 10px; margin-left: 2px; }
 .field { margin-bottom: 10px; }
 .field label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-bottom: 4px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .field select, .field input[type="text"] {
   width: 100%;
@@ -254,6 +254,7 @@ table.sheet td.row-name {
 .cell-read {
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
+  position: relative;
 }
 /* stopped: this is the cell whose value the cascade returned.
    Solid outline + bold text + accent-filled corner triangle, so the
@@ -265,15 +266,26 @@ table.sheet td.row-name {
   position: relative;
 }
 .cell-stop::after {
-  content: '';
+  content: attr(data-step);
   position: absolute;
-  top: 0;
-  right: 0;
-  width: 0;
-  height: 0;
-  border-style: solid;
-  border-width: 0 9px 9px 0;
-  border-color: transparent var(--accent) transparent transparent;
+  top: 2px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  pointer-events: none;
+}
+.cell-read:not(.cell-stop)::after {
+  content: attr(data-step);
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  opacity: 0.55;
+  line-height: 1;
   pointer-events: none;
 }
 /* The two states can co-exist on a single cell (the "stop" cell is
@@ -395,6 +407,41 @@ code.inline {
   font-size: 12px;
 }
 .muted-note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+/* ── Tooltip (pure CSS, ? trigger) ───────────────────────── */
+.tip { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#eff6ff; color:var(--accent); font-size:10px; font-weight:700; cursor:help; position:relative; vertical-align:middle; margin-left:4px; border:1px solid #bfdbfe; flex-shrink:0; }
+.tip::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); background:#1e293b; color:white; padding:6px 10px; border-radius:6px; font-size:12px; width:230px; white-space:normal; opacity:0; transition:opacity .15s; z-index:100; pointer-events:none; line-height:1.5; text-align:left; box-shadow:0 4px 12px rgba(0,0,0,.2); }
+.tip::before { content:''; position:absolute; bottom:calc(100% + 1px); left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:#1e293b; opacity:0; transition:opacity .15s; z-index:101; pointer-events:none; }
+.tip:hover::after, .tip:hover::before, .tip:focus::after, .tip:focus::before { opacity:1; }
+
+/* ── Onboarding banner ────────────────────────────────────── */
+.onboarding-banner { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px 20px; margin-bottom: 14px; font-size: 13px; line-height: 1.6; }
+.onboarding-banner h3 { margin: 0 0 8px; font-size: 14px; color: var(--text); }
+.onboarding-banner p { margin: 0; }
+.onboarding-banner p + p { margin-top: 6px; }
+.onboarding-banner .dismiss { float: right; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 0; margin: -2px -2px 0 8px; }
+.onboarding-banner .dismiss:hover { color: var(--text); }
+
+/* ── Glossary panel ───────────────────────────────────────── */
+.glossary-panel { padding: 0 !important; }
+.glossary-panel summary { cursor: pointer; padding: 12px 16px; list-style: none; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; user-select: none; }
+.glossary-panel summary::-webkit-details-marker { display: none; }
+.glossary-panel summary::before { content: '▸'; font-size: 10px; color: var(--muted); transition: transform .15s; }
+.glossary-panel[open] summary::before { transform: rotate(90deg); }
+.glossary-panel .glossary-body { padding: 0 16px 16px; font-size: 12px; }
+.glossary-panel dt { font-weight: 600; margin-top: 10px; color: var(--text); }
+.glossary-panel dd { margin: 2px 0 0 12px; color: var(--muted); line-height: 1.5; }
+
+/* ── Narrative trace output ───────────────────────────────── */
+.narrative-trace { font-size: 13px; line-height: 1.7; }
+.story-block { padding: 10px 14px; margin-bottom: 8px; border-radius: 6px; background: #f8fafd; border-left: 3px solid var(--border); }
+.story-block.is-stop { border-left-color: var(--accent); background: #eff6ff; }
+.story-block.is-circuit { border-left-color: #059669; background: #f0fdf4; }
+.story-block.is-fallback { border-left-color: #d97706; background: #fffbeb; }
+.story-outcome { margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
+.perm-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; }
+
+
 </style>
 </head>
 <body>
@@ -412,8 +459,35 @@ code.inline {
 </header>
 <div class="layout">
   <div class="left">
+
+    <!-- EASY MODE: onboarding banner -->
+    <div class="onboarding-banner" id="onboardingBanner">
+      <button class="dismiss" onclick="dismissOnboarding()" title="Dismiss">&#x2715;</button>
+      <h3>What does this tool do?</h3>
+      <p>This tool answers one question: <strong>what can a specific user do on a specific record?</strong> Upload the security spreadsheet for your Odessa system (or use the demo), tell us who the user is and what you're checking — and we'll show you the answer in plain English.</p>
+      <p style="margin-top:6px; color:var(--muted); font-size:12px;">New to the terminology? Open the <strong>Glossary</strong> below, or hover the <strong>?</strong> markers next to any label.</p>
+    </div>
+
+    <!-- EASY MODE: glossary -->
+    <details class="panel glossary-panel">
+      <summary>Glossary &mdash; what do these terms mean?</summary>
+      <dl class="glossary-body">
+        <dt>F &mdash; Full</dt><dd>The user can see, edit, and do everything on this record.</dd>
+        <dt>M &mdash; Modify</dt><dd>The user can open and edit the record, but special admin actions are hidden.</dd>
+        <dt>R &mdash; Read</dt><dd>The user can open and view the record but cannot change anything.</dd>
+        <dt>N &mdash; None</dt><dd>The record is completely hidden from this user — they cannot access it at all.</dd>
+        <dt>X &mdash; Not set / undefined</dt><dd>"No specific rule here." The system keeps looking. If nothing ever resolves, it acts like None.</dd>
+        <dt>Record type / Block</dt><dd>A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.</dd>
+        <dt>Operation / Field</dt><dd>A specific action or field on the record — e.g. Amount, ApprovedBy. Leave blank to check access to the record itself.</dd>
+        <dt>Role</dt><dd>A label assigned to a user that determines what they can do. A user can have multiple roles.</dd>
+        <dt>Default permission</dt><dd>The fallback access level for a role — used when no specific rule matches. Set per role in the database.</dd>
+        <dt>System fallback</dt><dd>A site-wide setting that fills in for any role whose default is "not set" (X). Usually Full.</dd>
+        <dt>Record property / Condition</dt><dd>A fact about the specific record being accessed (e.g. "Is this invoice active?"). Some rules only apply when the record has a certain property.</dd>
+      </dl>
+    </details>
+
     <div class="panel">
-      <h2>Step 1 &middot; workbook</h2>
+      <h2>Step 1 &middot; Load the security spreadsheet</h2>
       <label class="dropzone" id="dropzone">
         <input type="file" id="file" accept=".xlsx,.xls">
         <div id="dropMsg"><strong>Drop .xlsx here</strong> or click to browse</div>
@@ -423,23 +497,23 @@ code.inline {
       </div>
     </div>
     <div class="panel" id="queryPanel" style="display:none;">
-      <h2>Step 2 &middot; query target</h2>
+      <h2>Step 2 &middot; What are you checking?</h2>
       <div class="tabs" id="tabs"></div>
       <div class="field">
-        <label>Block</label>
+        <label>Record type<span class="tip" tabindex="0" data-tip="A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.">?</span></label>
         <select id="block"></select>
       </div>
       <div class="field">
-        <label>Operation (optional)</label>
+        <label>Specific action or field (optional)<span class="tip" tabindex="0" data-tip="A specific field or action on the record — e.g. Amount, ApprovedBy. Leave blank to check access to the record itself.">?</span></label>
         <select id="operation">
           <option value="">&mdash; entity-level &mdash;</option>
         </select>
       </div>
     </div>
     <div class="panel" id="rolesPanel" style="display:none;">
-      <h2>Step 3 &middot; user roles</h2>
+      <h2>Step 3 &middot; Who is the user?</h2>
       <div class="field">
-        <label>Site-level default <span style="text-transform:none; letter-spacing:0; font-weight:400;">(<code class="inline">Global.UserRole.DefaultRolePermission</code>)</span></label>
+        <label>System fallback permission<span class="tip" tabindex="0" data-tip="If a role has no default permission set, the system uses this value instead. Usually Full. Matches the Global.UserRole.DefaultRolePermission setting in your Odessa config.">?</span></label>
         <select id="siteLevelDefault">
           <option value="F" selected>F &mdash; Full</option>
           <option value="M">M &mdash; Modify</option>
@@ -449,19 +523,16 @@ code.inline {
       </div>
       <div id="roleList"></div>
       <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
-      <p class="muted-note">DefaultPermission is the value that role carries on the master <code class="inline">Roles</code> entity in the database. If it is <code class="inline">X</code>, the framework substitutes the site-level default at login time (<a href="#" id="showXNote" style="color:var(--accent);">why?</a>).</p>
-      <div id="xNote" style="display:none; font-size:12px; color:var(--muted); margin-top:6px; padding:8px 10px; background:#f8fafc; border:1px solid var(--border); border-radius:4px;">
-        <code class="inline">UserContextHelper.cs</code> reads <code class="inline">Global.UserRole.DefaultRolePermission</code> when building the user's role list. Any role whose stored DefaultPermission is <code class="inline">X</code> is rewritten to that site-level value before the cascade ever runs &mdash; so step&nbsp;5 in production never sees <code class="inline">X</code>.
-      </div>
+      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the system fallback permission you chose above.</p>
     </div>
     <div class="panel" id="conditionsPanel" style="display:none;">
-      <h2>Step 4 &middot; entity condition values</h2>
-      <p class="muted-note" style="margin-top:0;">Conditional RBS columns only match when the entity's actual condition values agree. Set each to <code class="inline">T</code> or <code class="inline">F</code> to simulate. Unset values cannot satisfy a <code class="inline">T</code>/<code class="inline">F</code> demand and will filter that column out.</p>
+      <h2>Step 4 &middot; Record properties</h2>
+      <p class="muted-note" style="margin-top:0;">Some permission rules only apply when the record has specific properties. Set each property below to simulate a real record.</p>
       <div id="conditionList"></div>
     </div>
     <div class="panel" id="actionPanel" style="display:none;">
       <button class="primary" id="evaluate">Evaluate permission</button>
-      <button class="secondary" id="runTests" style="margin-top:8px; width:100%;">Run sanity tests</button>
+      <div style="text-align:center; margin-top:10px;"><a href="#" id="runTests" style="font-size:11px; color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--muted);">Run algorithm tests</a></div>
     </div>
   </div>
   <div class="right">
@@ -706,6 +777,7 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
     common: null,
     readCells: new Set(),
     stopCells: new Set(),
+    stepNumbers: new Map(),
     unconfiguredPerm: 'X',
     shortCircuit: false,
     operationName,
@@ -780,7 +852,7 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
     cascadeTargets.push({ roleColumn: rc, userRole });
   }
 
-  const recordRead = (rowKey, key) => trace.readCells.add(rowKey + '|' + key);
+  const recordRead = (rowKey, key, n) => { trace.readCells.add(rowKey + '|' + key); if (n != null) trace.stepNumbers.set(rowKey + '|' + key, n); };
   const recordStop = (rowKey, key) => trace.stopCells.add(rowKey + '|' + key);
 
   let roleBasedPerm = null;
@@ -820,11 +892,11 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
       const starLabel = starCount > 1 ? `*[col${starIdx}]` : '*';
       if (opRow) {
         commonPerm = opRow.values[starIdx];
-        recordRead('op', starKey);
+        recordRead('op', starKey, 1);
         steps.push({ desc: `${operationName} × ${starLabel}`, value: commonPerm, stop: commonPerm !== 'X', cell: { row: 'op', col: starKey } });
         if (commonPerm === 'X') {
           commonPerm = (block.permissions || [])[starIdx] || 'X';
-          recordRead('perm', starKey);
+          recordRead('perm', starKey, 2);
           steps.push({ desc: `Permissions × ${starLabel}`, value: commonPerm, stop: true, cell: { row: 'perm', col: starKey } });
           recordStop('perm', starKey);
         } else {
@@ -832,7 +904,7 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
         }
       } else {
         commonPerm = (block.permissions || [])[starIdx] || 'X';
-        recordRead('perm', starKey);
+        recordRead('perm', starKey, 1);
         steps.push({ desc: `Permissions × ${starLabel}`, value: commonPerm, stop: true, cell: { row: 'perm', col: starKey } });
         recordStop('perm', starKey);
       }
@@ -860,7 +932,7 @@ function cascadeForColumn(block, userRole, roleColumn, opRow, operationName, sta
   const starLabel = ambiguousStar ? `*[col${starIdx}]` : '*';
 
   const probe = (n, rowKey, key, value, label) => {
-    recordRead(rowKey, key);
+    recordRead(rowKey, key, n);
     const stop = value !== 'X';
     steps.push({ n, desc: label, value, stop, cell: { row: rowKey, col: key } });
     if (stop) recordStop(rowKey, key);
@@ -1096,12 +1168,180 @@ function runEvaluate() {
 
 const siteSel = $('siteLevelDefault');
 if (siteSel) siteSel.addEventListener('change', e => { siteLevelDefault = e.target.value; });
-const xNoteLink = $('showXNote');
-if (xNoteLink) xNoteLink.addEventListener('click', e => {
-  e.preventDefault();
-  const n = $('xNote');
-  n.style.display = n.style.display === 'none' ? '' : 'none';
-});
+
+function dismissOnboarding() {
+  localStorage.setItem('rbsOnboardingDismissed', '1');
+  const b = document.getElementById('onboardingBanner');
+  if (b) b.style.display = 'none';
+}
+
+// ============================================================
+// Easy mode helpers
+// ============================================================
+function permChip(p) {
+  return `<span class="perm-chip cell-${p}">${p} &mdash; ${PERM_NAME[p]}</span>`;
+}
+
+function easyBannerText(raw) {
+  if (raw.startsWith('Short-circuit'))
+    return 'One of the user\'s roles already grants <strong>Full</strong> access, so the system stopped immediately without reading the spreadsheet.';
+  if (raw.startsWith('User has no roles'))
+    return 'No roles have been added for this user (Step 3). Add at least one role to get a meaningful result.';
+  if (raw.startsWith('Operation'))
+    return 'The action you selected wasn\'t found in this record type\'s rules. Showing the record-level permission instead.';
+  if (raw.startsWith('Condition filter'))
+    return 'Some permission columns were skipped because the record properties you set didn\'t match their conditions.';
+  if (raw.startsWith('This block has'))
+    return 'Some record properties in Step 4 are not set. Columns that require a specific property value may be ignored.';
+  if (raw.startsWith('Parse warning'))
+    return 'The spreadsheet contains some unexpected values. They\'ve been treated as "not set" (X).';
+  if (raw.startsWith('Site-level substitution'))
+    return 'One or more roles had no default permission set, so the system used your system fallback value.';
+  if (raw.startsWith('Role "')) {
+    const m = raw.match(/^Role "(.*?)" is not/);
+    const name = m ? escapeHtml(m[1]) : 'unknown';
+    return `The role name "<strong>${name}</strong>" wasn't found in the spreadsheet &mdash; check the spelling.`;
+  }
+  return raw;
+}
+
+function buildEasyVerdict(t) {
+  const fn = PERM_NAME[t.final];
+  if (t.shortCircuit)
+    return `Access was immediately set to <strong>Full</strong> &mdash; a role with maximum access was found before any spreadsheet cells needed to be read.`;
+  if (t.groupA.length === 0) {
+    const catchAllResult = t.roleBasedPerm || 'X';
+    if (t.groupB.length > 0 && PERM_RANK[t.unconfiguredPerm] > PERM_RANK[catchAllResult]) {
+      return `The catch-all rule gave <strong>${PERM_NAME[catchAllResult]}</strong>, but the user also has ${t.groupB.length} role(s) not configured in this block — their default access raised the final result to <strong>${fn}</strong>.`;
+    }
+    return `No specific rules were found for the user's roles in this record type. The system used the catch-all rule, which gives <strong>${fn}</strong>.`;
+  }
+  const roles = t.groupA.map(r => `<em>${escapeHtml(r.role)}</em>`).join(', ');
+  if (t.groupB.length === 0)
+    return `The system checked the rules for ${roles} and resolved to <strong>${fn}</strong>.`;
+  return `The system checked rules for ${roles} and also considered ${t.groupB.length} unconfigured role(s). The most permissive result is <strong>${fn}</strong>.`;
+}
+
+function addStoryBlock(container, html, cls) {
+  const div = document.createElement('div');
+  div.className = 'story-block' + (cls ? ' ' + cls : '');
+  div.innerHTML = html;
+  container.appendChild(div);
+}
+
+function stepSentence(stepN, roleName, opName, value, stopped) {
+  const op = opName ? `<strong>${escapeHtml(opName)}</strong>` : 'the selected action';
+  const role = `<strong>${escapeHtml(roleName)}</strong>`;
+  const chip = permChip(value);
+  const verdict = stopped
+    ? ` &rarr; ${chip}. That's a real answer, so the system stops here.`
+    : ` &rarr; X (not set). No rule here, keep looking.`;
+  const prefix = `<span style="font-size:11px; font-weight:600; color:var(--muted); margin-right:4px;">Step ${stepN} of 5 &mdash;</span>`;
+  switch (stepN) {
+    case 1: return `${prefix}Checked the rule for ${role} on ${op}${verdict}`;
+    case 2: return `${prefix}Checked the catch-all rule for ${op}${verdict}`;
+    case 3: return `${prefix}Checked the general record-level rule for ${role}${verdict}`;
+    case 4: return `${prefix}Checked the catch-all record-level rule${verdict}`;
+    case 5: return `${prefix}Used ${role}'s default access level from the database${verdict}`;
+    default: return `${prefix}${verdict}`;
+  }
+}
+
+function appendGroupASteps(container, role, opName) {
+  for (const s of role.steps) {
+    addStoryBlock(container, stepSentence(s.n, role.role, opName, s.value, s.stop), s.stop ? 'is-stop' : '');
+  }
+}
+
+function appendCommonSteps(container, t) {
+  if (!t.common) return;
+  const steps = t.common.steps || [];
+  if (steps.length === 0) {
+    addStoryBlock(container, `No catch-all rule matched for this record type. Result: ${permChip(t.common.result)}.`);
+    return;
+  }
+  const op = t.operationName;
+  steps.forEach((s, i) => {
+    const chip = permChip(s.value);
+    let text;
+    // First step with an operation = operation × * check; otherwise = permissions × * check
+    if (i === 0 && op) {
+      text = s.stop
+        ? `The catch-all rule for <strong>${escapeHtml(op)}</strong> gives ${chip}. That's the answer.`
+        : `The catch-all rule for <strong>${escapeHtml(op)}</strong> was not set (X). Checking the record-level default next.`;
+    } else if (s.desc && s.desc.startsWith('No *')) {
+      text = `No catch-all column matched the current record properties. Result: ${chip}.`;
+    } else {
+      text = s.stop
+        ? `The record-level catch-all rule gives ${chip}. That's the answer.`
+        : `No catch-all rule matched. Result: ${chip}.`;
+    }
+    addStoryBlock(container, text, s.stop ? 'is-stop' : '');
+  });
+}
+
+function buildNarrativeTrace(t) {
+  const wrap = document.createElement('div');
+  wrap.className = 'narrative-trace';
+
+  if (t.shortCircuit) {
+    const names = t.groupB.filter(r => r.defaultPerm === 'F').map(r => escapeHtml(r.role)).join(', ') ||
+                  t.groupB.map(r => escapeHtml(r.role)).join(', ');
+    addStoryBlock(wrap,
+      `The system immediately found that <strong>${names}</strong> &mdash; a role not listed in this record type's rules &mdash; has <strong>Full</strong> access by default. ` +
+      `The highest possible access is already reached, so the system stopped here without reading any cells from the spreadsheet.`,
+      'is-circuit');
+    return wrap;
+  }
+
+  if (t.groupA.length === 0) {
+    addStoryBlock(wrap, `None of the user's roles are specifically listed in this record type's rules. The system falls back to the catch-all (*) rule.`);
+    appendCommonSteps(wrap, t);
+    if (t.groupB.length) {
+      const names = t.groupB.map(r => escapeHtml(r.role)).join(', ');
+      addStoryBlock(wrap,
+        `The user also has ${t.groupB.length} role(s) not configured in this block: <em>${names}</em>. Their default access level contributes ${permChip(t.unconfiguredPerm)}.`,
+        'is-fallback');
+    }
+    const outcome = document.createElement('div');
+    outcome.className = 'story-outcome';
+    outcome.innerHTML = `Final result: ${permChip(t.final)}`;
+    wrap.appendChild(outcome);
+    return wrap;
+  }
+
+  for (const role of t.groupA) {
+    if (role.substituted) {
+      addStoryBlock(wrap,
+        `Note: <strong>${escapeHtml(role.role)}</strong>'s database default was X (not set), so it was replaced with the system fallback (${permChip(role.defaultPerm)}) before checking.`);
+    }
+    addStoryBlock(wrap,
+      `<strong>${escapeHtml(role.role)}</strong> has its own column in this record type's rules. The system works through up to 5 checks, stopping at the first real answer.`);
+    appendGroupASteps(wrap, role, t.operationName);
+  }
+
+  if (t.groupA.length > 1) {
+    const parts = t.groupA.map(r => `${escapeHtml(r.role)} &rarr; ${PERM_NAME[r.result]}`).join(', ');
+    addStoryBlock(wrap,
+      `Multiple roles were checked. The most permissive answer wins: ${parts}. Combined: ${permChip(t.roleBasedPerm)}.`,
+      'is-stop');
+  }
+
+  if (t.groupB.length) {
+    const names = t.groupB.map(r => escapeHtml(r.role)).join(', ');
+    addStoryBlock(wrap,
+      `The user also has ${t.groupB.length} role(s) not listed in this block: <em>${names}</em>. Their default access level contributes ${permChip(t.unconfiguredPerm)}.`,
+      'is-fallback');
+  }
+
+  const outcome = document.createElement('div');
+  outcome.className = 'story-outcome';
+  outcome.innerHTML = t.groupB.length
+    ? `Final result: highest of configured rules (${PERM_NAME[t.roleBasedPerm]}) and unconfigured roles (${PERM_NAME[t.unconfiguredPerm]}) = ${permChip(t.final)}`
+    : `Final result: ${permChip(t.final)}`;
+  wrap.appendChild(outcome);
+  return wrap;
+}
 
 // ============================================================
 // Rendering of results
@@ -1143,7 +1383,8 @@ function renderResults(block, operationName, t) {
     }
   }
   for (const b of banners) {
-    const el = document.createElement('div'); el.className = 'banner'; el.textContent = b;
+    const el = document.createElement('div'); el.className = 'banner';
+    el.innerHTML = easyBannerText(b);
     out.appendChild(el);
   }
 
@@ -1171,7 +1412,11 @@ function buildFinalCard(t) {
   info.className = 'final-info';
   info.innerHTML = `
     <h3>${PERM_NAME[t.final]}${t.final === 'X' ? ' &mdash; effectively None' : ''}</h3>
-    <div class="formula">${makeFormula(t)}</div>
+    <p style="font-size:13px; color:var(--muted); margin:4px 0 6px;">${buildEasyVerdict(t)}</p>
+    <details style="margin:0 0 8px;">
+      <summary style="font-size:11px; color:var(--muted); cursor:pointer;">Show calculation</summary>
+      <div class="formula" style="margin-top:6px;">${makeFormula(t)}</div>
+    </details>
     <div class="ux">${UX_EFFECT[t.final]}</div>`;
   card.appendChild(info);
   return card;
@@ -1200,7 +1445,11 @@ function makeFormula(t) {
 function buildSheetPanel(block, operationName, t) {
   const panel = document.createElement('div');
   panel.className = 'panel';
-  panel.innerHTML = `<h2>Block &middot; ${escapeHtml(block.identifier)}${operationName ? ` &middot; operation: ${escapeHtml(operationName)}` : ' &middot; block-level'}</h2>`;
+  panel.innerHTML = `<h2>Rules checked in the spreadsheet &mdash; ${escapeHtml(block.identifier)}</h2>`;
+  const caption = document.createElement('p');
+  caption.style.cssText = 'font-size:12px; color:var(--muted); margin:0 0 10px;';
+  caption.innerHTML = '<strong>Dashed border</strong> = a cell the system read but moved past. <strong>Bold solid border</strong> = where it found the answer and stopped. Strikethrough columns were filtered out by record properties.';
+  panel.appendChild(caption);
   const legend = document.createElement('div');
   legend.className = 'legend';
   legend.innerHTML =
@@ -1218,6 +1467,7 @@ function buildSheetPanel(block, operationName, t) {
 function buildSheetTable(block, operationName, t) {
   const readSet = t ? t.readCells : new Set();
   const stopSet = t ? t.stopCells : new Set();
+  const stepMap = (t && t.stepNumbers) ? t.stepNumbers : new Map();
   const unmatched = new Set((t && t.unmatchedColumns || []).map(c => c.columnIndex));
   const tbl = document.createElement('table'); tbl.className = 'sheet';
   const thead = document.createElement('thead'); const trh = document.createElement('tr');
@@ -1262,6 +1512,7 @@ function buildSheetTable(block, operationName, t) {
       const key = 'perm|col' + rc.columnIndex;
       if (readSet.has(key)) td.classList.add('cell-read');
       if (stopSet.has(key)) td.classList.add('cell-stop');
+      const sn = stepMap.get(key); if (sn != null) td.dataset.step = sn;
       td.textContent = v;
       tr.appendChild(td);
     }
@@ -1283,6 +1534,7 @@ function buildSheetTable(block, operationName, t) {
         const key = 'op|col' + rc.columnIndex;
         if (readSet.has(key)) td.classList.add('cell-read');
         if (stopSet.has(key)) td.classList.add('cell-stop');
+        const sn = stepMap.get(key); if (sn != null) td.dataset.step = sn;
       }
       tr.appendChild(td);
     }
@@ -1292,11 +1544,8 @@ function buildSheetTable(block, operationName, t) {
   return tbl;
 }
 
-function buildTracePanel(t) {
-  const panel = document.createElement('div');
-  panel.className = 'panel';
-  panel.innerHTML = '<h2>Resolution trace</h2>';
-  panel.appendChild(buildStepsKey(t));
+function buildTechnicalTrace(container, t) {
+  container.appendChild(buildStepsKey(t));
 
   if (t.shortCircuit) {
     const p = document.createElement('p');
@@ -1306,12 +1555,11 @@ function buildTracePanel(t) {
       '(to decide Group A vs Group B). Because that yielded <code class="inline">Full</code>, the framework skipped the ' +
       'per-cell lookups against the Permissions row and operation rows &mdash; including the per-role 5-step cascade &mdash; ' +
       'and returned <code class="inline">Full</code>.';
-    panel.appendChild(p);
-    panel.appendChild(buildGroupBSection(t));
-    return panel;
+    container.appendChild(p);
+    container.appendChild(buildGroupBSection(t));
+    return;
   }
 
-  // Disambiguate role names only when a role appears more than once in Group A.
   const groupACounts = {};
   for (const r of t.groupA) groupACounts[r.role] = (groupACounts[r.role] || 0) + 1;
   for (const role of t.groupA) {
@@ -1323,7 +1571,7 @@ function buildTracePanel(t) {
     const colTag = groupACounts[role.role] > 1 ? ` &middot; column ${role.columnIndex}` : '';
     rt.innerHTML = `<h4>${escapeHtml(role.role)}${colTag} &middot; Group A &middot; ${defaultBit} &rarr; result <strong>${role.result}</strong></h4>`;
     rt.appendChild(buildStepList(role.steps));
-    panel.appendChild(rt);
+    container.appendChild(rt);
   }
   if (t.common) {
     const rt = document.createElement('div');
@@ -1337,9 +1585,28 @@ function buildTracePanel(t) {
       ol.appendChild(li);
     });
     rt.appendChild(ol);
-    panel.appendChild(rt);
+    container.appendChild(rt);
   }
-  panel.appendChild(buildGroupBSection(t));
+  container.appendChild(buildGroupBSection(t));
+}
+
+function buildTracePanel(t) {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+
+  panel.innerHTML = '<h2>How was this decided?</h2>';
+  panel.appendChild(buildNarrativeTrace(t));
+  const det = document.createElement('details');
+  det.className = 'steps-key';
+  det.style.marginTop = '12px';
+  const sum = document.createElement('summary');
+  sum.textContent = 'Show technical details';
+  det.appendChild(sum);
+  const techWrap = document.createElement('div');
+  techWrap.className = 'key-body';
+  buildTechnicalTrace(techWrap, t);
+  det.appendChild(techWrap);
+  panel.appendChild(det);
   return panel;
 }
 
@@ -1553,7 +1820,7 @@ function buildDemoWorkbook() {
 // ============================================================
 // Sanity tests
 // ============================================================
-$('runTests').addEventListener('click', runTests);
+$('runTests').addEventListener('click', e => { e.preventDefault(); runTests(); });
 function runTests() {
   const out = $('output');
   out.innerHTML = '';
@@ -1755,6 +2022,11 @@ function runTests() {
   summary.textContent = `${passed} / ${tests.length} passed`;
   log.appendChild(summary);
   out.appendChild(panel);
+}
+
+if (localStorage.getItem('rbsOnboardingDismissed') === '1') {
+  const b = document.getElementById('onboardingBanner');
+  if (b) b.style.display = 'none';
 }
 </script>
 </body>
