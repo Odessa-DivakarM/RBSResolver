@@ -484,6 +484,10 @@ code.inline {
 .matrix-row.hidden, .matrix-block.hidden { display: none; }
 .matrix-empty { padding: 30px 20px; text-align: center; color: var(--muted); font-size: 13px; background: var(--panel); border: 1px dashed var(--border); border-radius: 6px; }
 button.matrix-export { margin-left: auto; }
+.matrix-toggle-group { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); margin-left: 4px; }
+.matrix-link-btn { background: none; border: none; padding: 1px 2px; font: inherit; font-size: 11px; color: var(--muted); cursor: pointer; border-bottom: 1px dotted var(--muted); border-radius: 0; }
+.matrix-link-btn:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.matrix-link-sep { color: var(--border); user-select: none; }
 
 </style>
 </head>
@@ -2216,19 +2220,27 @@ function buildMatrixFilterBar() {
   }
   bar.appendChild(chips);
 
+  const toggleGroup = document.createElement('span');
+  toggleGroup.className = 'matrix-toggle-group';
   const expandBtn = document.createElement('button');
-  expandBtn.className = 'secondary';
-  expandBtn.textContent = 'Expand all';
+  expandBtn.type = 'button';
+  expandBtn.className = 'matrix-link-btn';
+  expandBtn.textContent = 'expand all';
   expandBtn.title = 'Open every block currently visible (filtered-out blocks are not affected).';
   expandBtn.addEventListener('click', () => setAllBlocksOpen(true));
-  bar.appendChild(expandBtn);
-
+  toggleGroup.appendChild(expandBtn);
+  const sep = document.createElement('span');
+  sep.className = 'matrix-link-sep';
+  sep.textContent = '·';
+  toggleGroup.appendChild(sep);
   const collapseBtn = document.createElement('button');
-  collapseBtn.className = 'secondary';
-  collapseBtn.textContent = 'Collapse all';
+  collapseBtn.type = 'button';
+  collapseBtn.className = 'matrix-link-btn';
+  collapseBtn.textContent = 'collapse all';
   collapseBtn.title = 'Close every block currently visible.';
   collapseBtn.addEventListener('click', () => setAllBlocksOpen(false));
-  bar.appendChild(collapseBtn);
+  toggleGroup.appendChild(collapseBtn);
+  bar.appendChild(toggleGroup);
 
   const exportBtn = document.createElement('button');
   exportBtn.className = 'secondary matrix-export';
