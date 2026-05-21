@@ -441,6 +441,47 @@ code.inline {
 .story-outcome { margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
 .perm-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; }
 
+/* ── Mode toggle (Single field / Access matrix) ───────────── */
+.mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; }
+.mode-toggle button { background: white; border: none; padding: 8px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.mode-toggle button + button { border-left: 1px solid var(--border); }
+.mode-toggle button.active { background: var(--accent); color: white; }
+.mode-toggle button:not(.active):hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ── Access matrix panel ──────────────────────────────────── */
+.matrix-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
+.matrix-filter-bar input.search { flex: 1; min-width: 180px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+.matrix-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.matrix-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; font-size: 11px; font-weight: 600; user-select: none; background: white; }
+.matrix-chip.active { border-color: var(--accent); }
+.matrix-chip .sw { width: 10px; height: 10px; border: 1px solid var(--border); border-radius: 2px; display: inline-block; }
+.matrix-chip:not(.active) { opacity: 0.45; text-decoration: line-through; }
+.matrix-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.matrix-tab { padding: 6px 14px; background: white; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px; }
+.matrix-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
+.matrix-block { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; }
+.matrix-block summary { cursor: pointer; padding: 10px 14px; list-style: none; display: flex; align-items: center; gap: 10px; user-select: none; font-weight: 600; font-size: 13px; }
+.matrix-block summary::-webkit-details-marker { display: none; }
+.matrix-block summary::before { content: '▸'; font-size: 10px; color: var(--muted); transition: transform .15s; flex-shrink: 0; }
+.matrix-block[open] summary::before { transform: rotate(90deg); }
+.matrix-block .block-label { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
+.matrix-block .badge-counts { margin-left: auto; display: flex; gap: 4px; }
+.matrix-block .badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; border: 1px solid var(--border); }
+.matrix-block .block-body { padding: 4px 14px 12px; }
+.matrix-conditions { display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 10px; margin-bottom: 8px; background: #f8fafc; border: 1px dashed var(--border); border-radius: 4px; font-size: 12px; }
+.matrix-conditions .mc-cell { display: flex; align-items: center; gap: 6px; }
+.matrix-conditions .mc-cell label { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; color: var(--muted); }
+.matrix-conditions select { padding: 3px 6px; font: inherit; font-size: 12px; border: 1px solid var(--border); border-radius: 3px; background: white; }
+.matrix-rows { display: grid; grid-template-columns: 1fr auto; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.matrix-row { display: contents; }
+.matrix-row > .op-name { background: #fafbfc; padding: 6px 10px; font-size: 12px; }
+.matrix-row > .matrix-perm { padding: 6px 12px; text-align: center; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-weight: 700; cursor: pointer; user-select: none; min-width: 56px; transition: filter .15s; }
+.matrix-row > .matrix-perm:hover { filter: brightness(0.92); outline: 2px solid var(--accent); outline-offset: -2px; }
+.matrix-row > .matrix-perm[title]:hover::after { /* tooltip handled by native title */ }
+.matrix-row > .op-name .op-label { color: var(--muted); font-size: 11px; margin-left: 6px; }
+.matrix-row.hidden, .matrix-block.hidden { display: none; }
+.matrix-empty { padding: 30px 20px; text-align: center; color: var(--muted); font-size: 13px; background: var(--panel); border: 1px dashed var(--border); border-radius: 6px; }
+button.matrix-export { margin-left: auto; }
 
 </style>
 </head>
@@ -459,6 +500,12 @@ code.inline {
 </header>
 <div class="layout">
   <div class="left">
+
+    <!-- Mode toggle: Single field vs Access matrix -->
+    <div class="mode-toggle" id="modeToggle" role="tablist" aria-label="Resolver mode">
+      <button type="button" id="modeSingleBtn" class="active" role="tab" aria-selected="true" title="Evaluate one record/field at a time and see the full cascade">Single field</button>
+      <button type="button" id="modeMatrixBtn" role="tab" aria-selected="false" title="See effective permissions for every record and field in one view">Access matrix</button>
+    </div>
 
     <!-- EASY MODE: onboarding banner -->
     <div class="onboarding-banner" id="onboardingBanner">
@@ -533,6 +580,7 @@ code.inline {
     </div>
     <div class="panel" id="actionPanel" style="display:none;">
       <button class="primary" id="evaluate">Evaluate permission</button>
+      <button class="primary" id="generateMatrix" style="display:none;">Generate access matrix</button>
       <div style="text-align:center; margin-top:10px;"><a href="#" id="runTests" style="font-size:11px; color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--muted);">Run algorithm tests</a></div>
     </div>
   </div>
@@ -543,6 +591,7 @@ code.inline {
         Upload an RBS .xlsx file or click <em>Load demo workbook</em> on the left to begin.
       </div>
     </div>
+    <div id="matrixOutput" style="display:none;"></div>
   </div>
 </div>
 <datalist id="rolesList"></datalist>
@@ -973,6 +1022,12 @@ let siteLevelDefault = 'F';
 const userRoles = [];
 let entityState = {}; // { conditionName: 'T' | 'F' | undefined }
 
+// Access-matrix state
+let appMode = 'single'; // 'single' | 'matrix'
+let matrixSheet = 'Entities';
+const matrixConditionStates = new Map(); // key: `${sheet}:${blockIdx}` -> { [condName]: 'T' | 'F' }
+let matrixFilter = { text: '', levels: new Set(['F', 'M', 'R', 'N', 'X']) };
+
 // ============================================================
 // UI wiring
 // ============================================================
@@ -1171,6 +1226,36 @@ function runEvaluate() {
 
 const siteSel = $('siteLevelDefault');
 if (siteSel) siteSel.addEventListener('change', e => { siteLevelDefault = e.target.value; });
+
+// Mode toggle wiring
+$('modeSingleBtn').addEventListener('click', () => setAppMode('single'));
+$('modeMatrixBtn').addEventListener('click', () => setAppMode('matrix'));
+$('generateMatrix').addEventListener('click', () => renderMatrix());
+
+function setAppMode(mode) {
+  appMode = mode;
+  const single = mode === 'single';
+  $('modeSingleBtn').classList.toggle('active', single);
+  $('modeMatrixBtn').classList.toggle('active', !single);
+  $('modeSingleBtn').setAttribute('aria-selected', single ? 'true' : 'false');
+  $('modeMatrixBtn').setAttribute('aria-selected', single ? 'false' : 'true');
+  // Hide Step 2 (block/op pick) and Step 4 (conditions) in matrix mode
+  if (parsed) {
+    $('queryPanel').style.display = single ? '' : 'none';
+    if (single) {
+      renderConditions(); // restores Step 4 visibility based on current block
+    } else {
+      $('conditionsPanel').style.display = 'none';
+    }
+  }
+  // Swap the action button
+  $('evaluate').style.display = single ? '' : 'none';
+  $('generateMatrix').style.display = single ? 'none' : '';
+  // Swap the right-pane output
+  $('output').style.display = single ? '' : 'none';
+  $('matrixOutput').style.display = single ? 'none' : '';
+  if (!single && parsed) renderMatrix();
+}
 
 function dismissOnboarding() {
   localStorage.setItem('rbsOnboardingDismissed', '1');
@@ -2048,6 +2133,328 @@ function runTests() {
 if (localStorage.getItem('rbsOnboardingDismissed') === '1') {
   const b = document.getElementById('onboardingBanner');
   if (b) b.style.display = 'none';
+}
+
+// ============================================================
+// Access matrix (bulk view)
+// ============================================================
+function matrixBlockKey(sheetName, blockIdx) { return sheetName + ':' + blockIdx; }
+
+function getMatrixConditions(sheetName, blockIdx) {
+  const key = matrixBlockKey(sheetName, blockIdx);
+  if (!matrixConditionStates.has(key)) matrixConditionStates.set(key, {});
+  return matrixConditionStates.get(key);
+}
+
+// Returns [{ operation, label, finalPerm }] for the given block under the
+// supplied condition map. The synthetic "(default)" row is used when a block
+// has no operations, so the user still sees the block's Permissions-row value.
+function evaluateBlockRows(block, blockConditions) {
+  const rows = [];
+  if (block.operations && block.operations.length) {
+    for (const op of block.operations) {
+      const t = evaluate(block, op.name, userRoles, siteLevelDefault, blockConditions);
+      rows.push({ operation: op.name, label: op.label || '', finalPerm: t.final });
+    }
+  } else {
+    const t = evaluate(block, null, userRoles, siteLevelDefault, blockConditions);
+    rows.push({ operation: '', label: '(block-level default)', finalPerm: t.final });
+  }
+  return rows;
+}
+
+function renderMatrix() {
+  const host = $('matrixOutput');
+  host.innerHTML = '';
+  if (!parsed) {
+    host.innerHTML = `<div class="empty-state"><div class="big">No workbook loaded</div>Upload a sheet first, then return to access matrix.</div>`;
+    return;
+  }
+
+  host.appendChild(buildMatrixFilterBar());
+  host.appendChild(buildMatrixTabs());
+  const body = document.createElement('div');
+  body.id = 'matrixSheetBody';
+  host.appendChild(body);
+  renderMatrixSheet(matrixSheet);
+}
+
+function buildMatrixFilterBar() {
+  const bar = document.createElement('div');
+  bar.className = 'matrix-filter-bar';
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'search';
+  search.placeholder = 'Filter by record or field name…';
+  search.value = matrixFilter.text;
+  search.addEventListener('input', e => {
+    matrixFilter.text = e.target.value.trim().toLowerCase();
+    applyMatrixFilter();
+  });
+  bar.appendChild(search);
+
+  const chips = document.createElement('div');
+  chips.className = 'matrix-chips';
+  for (const p of ['F', 'M', 'R', 'N', 'X']) {
+    const c = document.createElement('span');
+    c.className = 'matrix-chip' + (matrixFilter.levels.has(p) ? ' active' : '');
+    c.innerHTML = `<span class="sw cell-${p}"></span>${p}`;
+    c.title = `${PERM_NAME[p]} — click to toggle`;
+    c.addEventListener('click', () => {
+      if (matrixFilter.levels.has(p)) matrixFilter.levels.delete(p);
+      else matrixFilter.levels.add(p);
+      c.classList.toggle('active');
+      applyMatrixFilter();
+    });
+    chips.appendChild(c);
+  }
+  bar.appendChild(chips);
+
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'secondary matrix-export';
+  exportBtn.textContent = 'Export CSV';
+  exportBtn.title = 'Download the matrix as a CSV file (current condition values per block are included).';
+  exportBtn.addEventListener('click', () => {
+    const csv = buildMatrixCSV();
+    downloadCSV(csv, `rbs-access-matrix-${matrixSheet.toLowerCase()}.csv`);
+  });
+  bar.appendChild(exportBtn);
+
+  return bar;
+}
+
+function buildMatrixTabs() {
+  const tabs = document.createElement('div');
+  tabs.className = 'matrix-tabs';
+  for (const s of ['Entities', 'Transactions', 'Tasks']) {
+    if (!parsed[s] || !parsed[s].length) continue;
+    const btn = document.createElement('button');
+    btn.className = 'matrix-tab' + (matrixSheet === s ? ' active' : '');
+    btn.textContent = `${s} (${parsed[s].length})`;
+    btn.addEventListener('click', () => {
+      matrixSheet = s;
+      renderMatrix();
+    });
+    tabs.appendChild(btn);
+  }
+  return tabs;
+}
+
+function renderMatrixSheet(sheetName) {
+  const body = $('matrixSheetBody');
+  if (!body) return;
+  body.innerHTML = '';
+  const blocks = parsed[sheetName] || [];
+  if (!blocks.length) {
+    body.innerHTML = `<div class="matrix-empty">No blocks in this sheet.</div>`;
+    return;
+  }
+  blocks.forEach((block, idx) => {
+    body.appendChild(renderMatrixBlock(block, sheetName, idx));
+  });
+  applyMatrixFilter();
+}
+
+function renderMatrixBlock(block, sheetName, blockIdx) {
+  const conds = getMatrixConditions(sheetName, blockIdx);
+  const wrap = document.createElement('details');
+  wrap.className = 'matrix-block';
+  wrap.open = true;
+  wrap.dataset.sheet = sheetName;
+  wrap.dataset.blockIdx = String(blockIdx);
+
+  const rows = evaluateBlockRows(block, conds);
+  const counts = { F: 0, M: 0, R: 0, N: 0, X: 0 };
+  for (const r of rows) counts[r.finalPerm] = (counts[r.finalPerm] || 0) + 1;
+
+  const summary = document.createElement('summary');
+  const title = document.createElement('span');
+  title.innerHTML = escapeHtml(block.identifier) + (block.label ? `<span class="block-label">— ${escapeHtml(block.label)}</span>` : '');
+  summary.appendChild(title);
+  const badges = document.createElement('span');
+  badges.className = 'badge-counts';
+  for (const p of ['F', 'M', 'R', 'N', 'X']) {
+    if (counts[p]) {
+      const b = document.createElement('span');
+      b.className = 'badge cell-' + p;
+      b.textContent = `${p} ×${counts[p]}`;
+      badges.appendChild(b);
+    }
+  }
+  summary.appendChild(badges);
+  wrap.appendChild(summary);
+
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'block-body';
+
+  if (block.conditions && block.conditions.length) {
+    bodyEl.appendChild(buildMatrixConditionsRow(block, sheetName, blockIdx));
+  }
+
+  bodyEl.appendChild(buildMatrixRowsTable(block, sheetName, blockIdx, rows));
+  wrap.appendChild(bodyEl);
+  return wrap;
+}
+
+function buildMatrixConditionsRow(block, sheetName, blockIdx) {
+  const conds = getMatrixConditions(sheetName, blockIdx);
+  const row = document.createElement('div');
+  row.className = 'matrix-conditions';
+  for (const c of block.conditions) {
+    const cell = document.createElement('div');
+    cell.className = 'mc-cell';
+    const lbl = document.createElement('label');
+    lbl.textContent = c.name;
+    cell.appendChild(lbl);
+    const sel = document.createElement('select');
+    const cur = conds[c.name] || '';
+    for (const opt of [{ v: '', t: '— unset —' }, { v: 'T', t: 'Y (true)' }, { v: 'F', t: 'N (false)' }]) {
+      const o = document.createElement('option');
+      o.value = opt.v; o.textContent = opt.t;
+      if (cur === opt.v) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', e => {
+      const v = e.target.value;
+      if (v) conds[c.name] = v;
+      else delete conds[c.name];
+      // Partial re-render: replace just this block's accordion in place.
+      refreshMatrixBlock(sheetName, blockIdx);
+    });
+    cell.appendChild(sel);
+    row.appendChild(cell);
+  }
+  return row;
+}
+
+function buildMatrixRowsTable(block, sheetName, blockIdx, rows) {
+  const grid = document.createElement('div');
+  grid.className = 'matrix-rows';
+  for (const r of rows) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'matrix-row';
+    rowEl.dataset.op = r.operation;
+    rowEl.dataset.perm = r.finalPerm;
+
+    const nameCell = document.createElement('div');
+    nameCell.className = 'op-name';
+    nameCell.innerHTML = escapeHtml(r.operation || '(default)') + (r.label ? `<span class="op-label">— ${escapeHtml(r.label)}</span>` : '');
+    rowEl.appendChild(nameCell);
+
+    const permCell = document.createElement('div');
+    permCell.className = 'matrix-perm cell-' + r.finalPerm;
+    permCell.textContent = r.finalPerm;
+    permCell.title = `${PERM_NAME[r.finalPerm]} — click to see the full trace`;
+    permCell.addEventListener('click', () => drillIntoMatrixCell(sheetName, blockIdx, r.operation));
+    rowEl.appendChild(permCell);
+
+    grid.appendChild(rowEl);
+  }
+  return grid;
+}
+
+function refreshMatrixBlock(sheetName, blockIdx) {
+  const body = $('matrixSheetBody');
+  if (!body) return;
+  const block = parsed[sheetName] && parsed[sheetName][blockIdx];
+  if (!block) return;
+  const sel = `details.matrix-block[data-sheet="${sheetName}"][data-block-idx="${blockIdx}"]`;
+  const existing = body.querySelector(sel);
+  if (!existing) return;
+  const fresh = renderMatrixBlock(block, sheetName, blockIdx);
+  fresh.open = existing.open;
+  existing.replaceWith(fresh);
+  applyMatrixFilter();
+}
+
+function applyMatrixFilter() {
+  const body = $('matrixSheetBody');
+  if (!body) return;
+  const q = matrixFilter.text;
+  const levels = matrixFilter.levels;
+  const blocks = body.querySelectorAll('details.matrix-block');
+  blocks.forEach(blockEl => {
+    const blockId = blockEl.querySelector('summary')?.textContent?.toLowerCase() || '';
+    let anyVisible = false;
+    blockEl.querySelectorAll('.matrix-row').forEach(rowEl => {
+      const op = (rowEl.dataset.op || '').toLowerCase();
+      const perm = rowEl.dataset.perm || 'X';
+      const textMatch = !q || op.includes(q) || blockId.includes(q);
+      const levelMatch = levels.has(perm);
+      const show = textMatch && levelMatch;
+      rowEl.classList.toggle('hidden', !show);
+      if (show) anyVisible = true;
+    });
+    blockEl.classList.toggle('hidden', !anyVisible);
+  });
+}
+
+function drillIntoMatrixCell(sheetName, blockIdx, operationName) {
+  const block = parsed[sheetName] && parsed[sheetName][blockIdx];
+  if (!block) return;
+  // Switch to single mode first so panels are visible.
+  setAppMode('single');
+  // Repopulate Step 2 selects to point at this block + operation.
+  selectSheet(sheetName);
+  const blockSel = $('block');
+  if (blockSel) {
+    blockSel.value = block.identifier;
+    selectBlock();
+  }
+  const opSel = $('operation');
+  if (opSel) opSel.value = operationName || '';
+  // Merge in matrix-mode conditions for this block; clear others so we don't
+  // leak state from a sibling block that happened to have the same name.
+  entityState = {};
+  const conds = getMatrixConditions(sheetName, blockIdx);
+  for (const c of block.conditions || []) {
+    if (conds[c.name]) entityState[c.name] = conds[c.name];
+  }
+  // Reflect in the Step 4 dropdowns.
+  const condSelects = $('conditionList') ? $('conditionList').querySelectorAll('select') : [];
+  block.conditions.forEach((c, i) => {
+    if (condSelects[i]) condSelects[i].value = conds[c.name] || '';
+  });
+  runEvaluate();
+  $('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function buildMatrixCSV() {
+  const lines = [['Sheet', 'Block', 'BlockLabel', 'Operation', 'OperationLabel', 'EffectivePermission', 'PermissionName', 'ConditionsApplied']];
+  for (const sheetName of ['Entities', 'Transactions', 'Tasks']) {
+    if (!parsed[sheetName]) continue;
+    parsed[sheetName].forEach((block, idx) => {
+      const conds = getMatrixConditions(sheetName, idx);
+      const condStr = Object.keys(conds).length
+        ? Object.entries(conds).map(([k, v]) => `${k}=${v}`).join(';')
+        : '';
+      const rows = evaluateBlockRows(block, conds);
+      for (const r of rows) {
+        lines.push([sheetName, block.identifier, block.label || '', r.operation, r.label, r.finalPerm, PERM_NAME[r.finalPerm], condStr]);
+      }
+    });
+  }
+  return lines.map(row => row.map(csvCell).join(',')).join('\r\n');
+}
+
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function downloadCSV(text, filename) {
+  // Prepend UTF-8 BOM so Excel auto-detects encoding.
+  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 </script>
 </body>
