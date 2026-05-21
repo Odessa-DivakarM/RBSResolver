@@ -441,6 +441,12 @@ code.inline {
 .story-outcome { margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
 .perm-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; }
 
+/* ── Loading spinner (workbook parse) ─────────────────────── */
+.loading-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: rbs-spin 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+@keyframes rbs-spin { to { transform: rotate(360deg); } }
+.dropzone.busy { cursor: progress; opacity: 0.85; }
+.dropzone.busy:hover { border-color: var(--border); background: transparent; color: var(--muted); }
+
 /* ── Mode toggle (Single field / Access matrix) ───────────── */
 .mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; }
 .mode-toggle button { background: white; border: none; padding: 8px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
@@ -670,6 +676,26 @@ function parseWorkbook(wb) {
     if (!wb.Sheets[name]) continue;
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
     out[name] = parseBlocks(rows);
+  }
+  return out;
+}
+
+// Same shape as parseWorkbook but starts from already-extracted row arrays
+// (produced by the parse worker). Used by the async upload path so the main
+// thread doesn't run XLSX.read/sheet_to_json itself.
+function parseWorkbookFromSheets(sheets) {
+  const out = { Entities: [], Transactions: [], Tasks: [], roles: [] };
+  if (sheets.Roles) {
+    for (const r of sheets.Roles) {
+      const v = String(r[0] == null ? '' : r[0]).trim();
+      if (!v || v === '#') continue;
+      if (/^roles?$/i.test(v)) continue;
+      out.roles.push(v);
+    }
+  }
+  for (const name of ['Entities', 'Transactions', 'Tasks']) {
+    if (!sheets[name]) continue;
+    out[name] = parseBlocks(sheets[name]);
   }
   return out;
 }
@@ -1051,18 +1077,100 @@ dropzone.addEventListener('drop', ev => {
 });
 fileInput.addEventListener('change', ev => { if (ev.target.files.length) handleFile(ev.target.files[0]); });
 
-function handleFile(f) {
-  const reader = new FileReader();
-  reader.onload = e => {
+// Worker source: parses the .xlsx binary off the main thread so the UI stays
+// responsive (large workbooks take 10–15s of XLSX.read alone). We import the
+// same XLSX build the page uses, then return the raw row arrays per sheet.
+const PARSE_WORKER_SRC = `
+  importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+  self.onmessage = function(e) {
     try {
-      const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, { type: 'array' });
-      parsed = parseWorkbook(wb);
-      $('dropMsg').innerHTML = `<strong>Loaded:</strong> ${escapeHtml(f.name)}`;
-      $('dropzone').title = `Loaded: ${f.name}. Click or drag-drop to load a different file.`;
-      onLoaded();
+      self.postMessage({ phase: 'reading' });
+      const wb = XLSX.read(new Uint8Array(e.data.buffer), { type: 'array' });
+      self.postMessage({ phase: 'extracting' });
+      const sheets = {};
+      for (const name of ['Roles', 'Entities', 'Transactions', 'Tasks']) {
+        if (wb.Sheets[name]) {
+          sheets[name] = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+        }
+      }
+      self.postMessage({ phase: 'done', sheets: sheets });
     } catch (err) {
-      $('dropMsg').textContent = 'Failed to read file: ' + err.message;
+      self.postMessage({ phase: 'error', message: String(err && err.message || err) });
+    }
+  };
+`;
+let parseWorker = null;
+let parsingInProgress = false;
+
+function getParseWorker() {
+  if (parseWorker) return parseWorker;
+  const blob = new Blob([PARSE_WORKER_SRC], { type: 'application/javascript' });
+  parseWorker = new Worker(URL.createObjectURL(blob));
+  return parseWorker;
+}
+
+function setDropBusy(text) {
+  $('dropzone').classList.add('busy');
+  $('dropMsg').innerHTML = `<span class="loading-spinner"></span> ${escapeHtml(text)}`;
+}
+function clearDropBusy() {
+  $('dropzone').classList.remove('busy');
+}
+
+function handleFile(f) {
+  if (parsingInProgress) return; // ignore secondary uploads while one is in flight
+  parsingInProgress = true;
+  setDropBusy(`Loading ${f.name}…`);
+  const reader = new FileReader();
+  reader.onerror = () => {
+    parsingInProgress = false;
+    clearDropBusy();
+    $('dropMsg').textContent = 'Could not read file.';
+  };
+  reader.onload = e => {
+    const buffer = e.target.result;
+    const worker = getParseWorker();
+    worker.onmessage = ev => {
+      const msg = ev.data;
+      if (msg.phase === 'reading') {
+        setDropBusy('Reading workbook…');
+      } else if (msg.phase === 'extracting') {
+        setDropBusy('Extracting sheets…');
+      } else if (msg.phase === 'error') {
+        parsingInProgress = false;
+        clearDropBusy();
+        $('dropMsg').textContent = 'Failed to read file: ' + msg.message;
+      } else if (msg.phase === 'done') {
+        setDropBusy('Building permission tables…');
+        // Yield so the message paints before parseBlocks runs synchronously.
+        requestAnimationFrame(() => {
+          try {
+            parsed = parseWorkbookFromSheets(msg.sheets);
+            clearDropBusy();
+            $('dropMsg').innerHTML = `<strong>Loaded:</strong> ${escapeHtml(f.name)}`;
+            $('dropzone').title = `Loaded: ${f.name}. Click or drag-drop to load a different file.`;
+            onLoaded();
+          } catch (err) {
+            clearDropBusy();
+            $('dropMsg').textContent = 'Failed to parse: ' + err.message;
+          } finally {
+            parsingInProgress = false;
+          }
+        });
+      }
+    };
+    worker.onerror = err => {
+      parsingInProgress = false;
+      clearDropBusy();
+      $('dropMsg').textContent = 'Worker error: ' + (err.message || 'unknown');
+    };
+    // Transfer the ArrayBuffer (zero-copy) — main thread no longer needs it.
+    try {
+      worker.postMessage({ buffer }, [buffer]);
+    } catch (err) {
+      parsingInProgress = false;
+      clearDropBusy();
+      $('dropMsg').textContent = 'Could not hand off to worker: ' + err.message;
     }
   };
   reader.readAsArrayBuffer(f);
