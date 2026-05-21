@@ -467,6 +467,8 @@ code.inline {
 .matrix-block .block-label { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
 .matrix-block .badge-counts { margin-left: auto; display: flex; gap: 4px; }
 .matrix-block .badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; border: 1px solid var(--border); }
+.matrix-block .entity-pill { cursor: pointer; padding: 3px 10px; font-size: 12px; transition: filter .15s, outline-color .15s; outline: 2px solid transparent; outline-offset: -2px; }
+.matrix-block .entity-pill:hover { filter: brightness(0.92); outline-color: var(--accent); }
 .matrix-block .block-body { padding: 4px 14px 12px; }
 .matrix-conditions { display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 10px; margin-bottom: 8px; background: #f8fafc; border: 1px dashed var(--border); border-radius: 4px; font-size: 12px; }
 .matrix-conditions .mc-cell { display: flex; align-items: center; gap: 6px; }
@@ -1085,6 +1087,9 @@ function onLoaded() {
       <div class="big">Workbook loaded</div>
       Pick a sheet, block, and roles, then click <em>Evaluate permission</em>.
     </div>`;
+  // Re-apply mode visibility — onLoaded turns everything on by default,
+  // but matrix mode wants Step 2 and Step 4 hidden.
+  setAppMode(appMode);
 }
 
 function refreshRolesList() {
@@ -2146,19 +2151,19 @@ function getMatrixConditions(sheetName, blockIdx) {
   return matrixConditionStates.get(key);
 }
 
-// Returns [{ operation, label, finalPerm }] for the given block under the
-// supplied condition map. The synthetic "(default)" row is used when a block
-// has no operations, so the user still sees the block's Permissions-row value.
+// Returns [{ operation, label, finalPerm, isEntity }] for the given block
+// under the supplied condition map. Always prepends an entity-level row
+// (operation = null) — that's the foundational "can the user open this record
+// at all?" answer and serves as the summary pill in the accordion header.
 function evaluateBlockRows(block, blockConditions) {
   const rows = [];
+  const entityTrace = evaluate(block, null, userRoles, siteLevelDefault, blockConditions);
+  rows.push({ operation: '', label: '(entity-level)', finalPerm: entityTrace.final, isEntity: true });
   if (block.operations && block.operations.length) {
     for (const op of block.operations) {
       const t = evaluate(block, op.name, userRoles, siteLevelDefault, blockConditions);
-      rows.push({ operation: op.name, label: op.label || '', finalPerm: t.final });
+      rows.push({ operation: op.name, label: op.label || '', finalPerm: t.final, isEntity: false });
     }
-  } else {
-    const t = evaluate(block, null, userRoles, siteLevelDefault, blockConditions);
-    rows.push({ operation: '', label: '(block-level default)', finalPerm: t.final });
   }
   return rows;
 }
@@ -2260,29 +2265,33 @@ function renderMatrixBlock(block, sheetName, blockIdx) {
   const conds = getMatrixConditions(sheetName, blockIdx);
   const wrap = document.createElement('details');
   wrap.className = 'matrix-block';
-  wrap.open = true;
+  wrap.open = false; // collapsed by default — large sheets (Entities ≈ 2918) need this
   wrap.dataset.sheet = sheetName;
   wrap.dataset.blockIdx = String(blockIdx);
 
   const rows = evaluateBlockRows(block, conds);
-  const counts = { F: 0, M: 0, R: 0, N: 0, X: 0 };
-  for (const r of rows) counts[r.finalPerm] = (counts[r.finalPerm] || 0) + 1;
+  const entityPerm = rows[0].finalPerm; // first row is always entity-level
+  const opRows = rows.slice(1); // operations only — entity is shown via the summary pill
 
   const summary = document.createElement('summary');
   const title = document.createElement('span');
   title.innerHTML = escapeHtml(block.identifier) + (block.label ? `<span class="block-label">— ${escapeHtml(block.label)}</span>` : '');
   summary.appendChild(title);
-  const badges = document.createElement('span');
-  badges.className = 'badge-counts';
-  for (const p of ['F', 'M', 'R', 'N', 'X']) {
-    if (counts[p]) {
-      const b = document.createElement('span');
-      b.className = 'badge cell-' + p;
-      b.textContent = `${p} ×${counts[p]}`;
-      badges.appendChild(b);
-    }
-  }
-  summary.appendChild(badges);
+  const entityBadge = document.createElement('span');
+  entityBadge.className = 'badge-counts';
+  const pill = document.createElement('span');
+  pill.className = 'badge cell-' + entityPerm + ' entity-pill';
+  pill.textContent = entityPerm;
+  pill.title = `Entity-level: ${PERM_NAME[entityPerm]} — can the user open this record at all? Click to see the full trace.`;
+  pill.dataset.perm = entityPerm;
+  pill.addEventListener('click', e => {
+    // Stop the <summary> from toggling open/closed when the pill is clicked.
+    e.preventDefault();
+    e.stopPropagation();
+    drillIntoMatrixCell(sheetName, blockIdx, '');
+  });
+  entityBadge.appendChild(pill);
+  summary.appendChild(entityBadge);
   wrap.appendChild(summary);
 
   const bodyEl = document.createElement('div');
@@ -2292,7 +2301,15 @@ function renderMatrixBlock(block, sheetName, blockIdx) {
     bodyEl.appendChild(buildMatrixConditionsRow(block, sheetName, blockIdx));
   }
 
-  bodyEl.appendChild(buildMatrixRowsTable(block, sheetName, blockIdx, rows));
+  if (opRows.length) {
+    bodyEl.appendChild(buildMatrixRowsTable(block, sheetName, blockIdx, opRows));
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'matrix-empty';
+    empty.style.padding = '12px';
+    empty.textContent = 'No operations defined on this block. The entity-level permission above is the complete answer.';
+    bodyEl.appendChild(empty);
+  }
   wrap.appendChild(bodyEl);
   return wrap;
 }
@@ -2339,7 +2356,7 @@ function buildMatrixRowsTable(block, sheetName, blockIdx, rows) {
 
     const nameCell = document.createElement('div');
     nameCell.className = 'op-name';
-    nameCell.innerHTML = escapeHtml(r.operation || '(default)') + (r.label ? `<span class="op-label">— ${escapeHtml(r.label)}</span>` : '');
+    nameCell.innerHTML = escapeHtml(r.operation) + (r.label && r.label !== r.operation ? `<span class="op-label">— ${escapeHtml(r.label)}</span>` : '');
     rowEl.appendChild(nameCell);
 
     const permCell = document.createElement('div');
@@ -2377,16 +2394,22 @@ function applyMatrixFilter() {
   blocks.forEach(blockEl => {
     const blockId = blockEl.querySelector('summary')?.textContent?.toLowerCase() || '';
     let anyVisible = false;
+    let anyOpMatch = false; // operation-name match (not just block-name) → worth auto-opening
     blockEl.querySelectorAll('.matrix-row').forEach(rowEl => {
       const op = (rowEl.dataset.op || '').toLowerCase();
       const perm = rowEl.dataset.perm || 'X';
-      const textMatch = !q || op.includes(q) || blockId.includes(q);
+      const opMatch = !!q && op && op.includes(q);
+      const textMatch = !q || opMatch || blockId.includes(q);
       const levelMatch = levels.has(perm);
       const show = textMatch && levelMatch;
       rowEl.classList.toggle('hidden', !show);
       if (show) anyVisible = true;
+      if (opMatch) anyOpMatch = true;
     });
     blockEl.classList.toggle('hidden', !anyVisible);
+    // Auto-open blocks whose operations match the search; otherwise leave the
+    // user's open/closed state alone so collapsed-by-default is preserved.
+    if (q && anyOpMatch) blockEl.open = true;
   });
 }
 
