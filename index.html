@@ -2307,6 +2307,9 @@ function renderMatrixBlock(block, sheetName, blockIdx) {
   const rows = evaluateBlockRows(block, conds);
   const entityPerm = rows[0].finalPerm; // first row is always entity-level
   const opRows = rows.slice(1); // operations only — entity is shown via the summary pill
+  // Stash identity + entity perm so the filter doesn't have to scrape DOM text.
+  wrap.dataset.blockId = (block.identifier || '').toLowerCase();
+  wrap.dataset.entityPerm = entityPerm;
 
   const summary = document.createElement('summary');
   const title = document.createElement('span');
@@ -2427,8 +2430,9 @@ function applyMatrixFilter() {
   const levels = matrixFilter.levels;
   const blocks = body.querySelectorAll('details.matrix-block');
   blocks.forEach(blockEl => {
-    const blockId = blockEl.querySelector('summary')?.textContent?.toLowerCase() || '';
-    let anyVisible = false;
+    const blockId = blockEl.dataset.blockId || '';
+    const entityPerm = blockEl.dataset.entityPerm || 'X';
+    let anyRowVisible = false;
     let anyOpMatch = false; // operation-name match (not just block-name) → worth auto-opening
     blockEl.querySelectorAll('.matrix-row').forEach(rowEl => {
       const op = (rowEl.dataset.op || '').toLowerCase();
@@ -2438,10 +2442,14 @@ function applyMatrixFilter() {
       const levelMatch = levels.has(perm);
       const show = textMatch && levelMatch;
       rowEl.classList.toggle('hidden', !show);
-      if (show) anyVisible = true;
+      if (show) anyRowVisible = true;
       if (opMatch) anyOpMatch = true;
     });
-    blockEl.classList.toggle('hidden', !anyVisible);
+    // The entity-pill in the summary is the canonical answer for the block.
+    // A block stays visible if its entity-pill passes the filter, regardless
+    // of operation rows — crucial for Tasks blocks which usually have none.
+    const entityVisible = (!q || blockId.includes(q)) && levels.has(entityPerm);
+    blockEl.classList.toggle('hidden', !(anyRowVisible || entityVisible));
     // Auto-open blocks whose operations match the search; otherwise leave the
     // user's open/closed state alone so collapsed-by-default is preserved.
     if (q && anyOpMatch) blockEl.open = true;
