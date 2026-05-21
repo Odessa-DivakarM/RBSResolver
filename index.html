@@ -2216,6 +2216,20 @@ function buildMatrixFilterBar() {
   }
   bar.appendChild(chips);
 
+  const expandBtn = document.createElement('button');
+  expandBtn.className = 'secondary';
+  expandBtn.textContent = 'Expand all';
+  expandBtn.title = 'Open every block currently visible (filtered-out blocks are not affected).';
+  expandBtn.addEventListener('click', () => setAllBlocksOpen(true));
+  bar.appendChild(expandBtn);
+
+  const collapseBtn = document.createElement('button');
+  collapseBtn.className = 'secondary';
+  collapseBtn.textContent = 'Collapse all';
+  collapseBtn.title = 'Close every block currently visible.';
+  collapseBtn.addEventListener('click', () => setAllBlocksOpen(false));
+  bar.appendChild(collapseBtn);
+
   const exportBtn = document.createElement('button');
   exportBtn.className = 'secondary matrix-export';
   exportBtn.textContent = 'Export CSV';
@@ -2227,6 +2241,15 @@ function buildMatrixFilterBar() {
   bar.appendChild(exportBtn);
 
   return bar;
+}
+
+function setAllBlocksOpen(open) {
+  const body = $('matrixSheetBody');
+  if (!body) return;
+  body.querySelectorAll('details.matrix-block').forEach(blockEl => {
+    if (blockEl.classList.contains('hidden')) return; // skip filtered-out blocks
+    blockEl.open = open;
+  });
 }
 
 function buildMatrixTabs() {
