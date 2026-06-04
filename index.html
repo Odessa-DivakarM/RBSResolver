@@ -538,10 +538,10 @@ button.matrix-export { margin-left: auto; }
         </div>
       </div>
     </div>
-    <div class="panel" id="rolesPanel" style="display:none;">
-      <h2>Who is the user?</h2>
+    <div class="panel" id="systemPanel" style="display:none;">
+      <h2>System config</h2>
       <div class="field">
-        <label>Global Parameter System fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' value in your Odessa DB.">?</span></label>
+        <label>GP system fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' in your Odessa DB. Used when a role's default permission is X (not set).">?</span></label>
         <select id="siteLevelDefault">
           <option value="F" selected>F &mdash; Full</option>
           <option value="M">M &mdash; Modify</option>
@@ -549,10 +549,13 @@ button.matrix-export { margin-left: auto; }
           <option value="N">N &mdash; None</option>
         </select>
       </div>
-      <div class="field"><label>Roles Assigned to the User<span class="tip" tabindex="0" data-tip="Role Names and the Default Permission value from Roles.DefaultPermission table in your Odessa DB">?</span></label></div>
+    </div>
+    <div class="panel" id="rolesPanel" style="display:none;">
+      <h2>Who is the user?</h2>
+      <div class="field"><label>Roles assigned to the user<span class="tip" tabindex="0" data-tip="Role Names and the Default Permission value from Roles.DefaultPermission table in your Odessa DB">?</span></label></div>
       <div id="roleList"></div>
       <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
-      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the system fallback permission you chose above.</p>
+      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the GP fallback above.</p>
     </div>
     <div class="panel" id="queryPanel" style="display:none;">
       <h2>What are you checking?</h2>
@@ -1180,8 +1183,9 @@ $('loadDemo').addEventListener('click', () => {
 
 function onLoaded() {
   if (!parsed) return;
-  $('queryPanel').style.display = '';
+  $('systemPanel').style.display = '';
   $('rolesPanel').style.display = '';
+  $('queryPanel').style.display = '';
   $('conditionsPanel').style.display = '';
   $('actionPanel').style.display = '';
   refreshRolesList();
