@@ -430,6 +430,24 @@ code.inline {
 .dropzone.busy { cursor: progress; opacity: 0.85; }
 .dropzone.busy:hover { border-color: var(--border); background: transparent; color: var(--muted); }
 
+/* ── Compact file strip (shown after workbook loads) ─────── */
+.file-strip { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 12px; }
+.file-strip-icon { font-size: 14px; flex-shrink: 0; }
+.file-strip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; color: var(--text); font-weight: 500; }
+.file-strip-change { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; color: var(--muted); cursor: pointer; flex-shrink: 0; }
+.file-strip-change:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Role list scroll (prevents unbounded growth) ────────── */
+#roleList { max-height: 200px; overflow-y: auto; }
+
+/* ── Conditions collapsible panel ────────────────────────── */
+.conditions-panel { padding: 0 !important; }
+.conditions-panel > summary { cursor: pointer; padding: 10px 16px; list-style: none; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); user-select: none; margin: 0; }
+.conditions-panel > summary::-webkit-details-marker { display: none; }
+.conditions-panel > summary::before { content: '▸'; font-size: 10px; color: var(--muted); transition: transform .15s; flex-shrink: 0; }
+.conditions-panel[open] > summary::before { transform: rotate(90deg); }
+.conditions-body { padding: 0 16px 14px; }
+
 /* ── Mode toggle (Single field / Access matrix) ───────────── */
 .mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; }
 .mode-toggle button { background: white; border: none; padding: 8px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
@@ -504,17 +522,24 @@ button.matrix-export { margin-left: auto; }
 
 
     <div class="panel">
-      <h2>Step 1 &middot; Load the security spreadsheet</h2>
-      <label class="dropzone" id="dropzone" title="Click to browse for your RBS .xlsx workbook, or drag and drop it here">
-        <input type="file" id="file" accept=".xlsx,.xls">
-        <div id="dropMsg"><strong>Drop .xlsx here</strong> or click to browse</div>
-      </label>
-      <div style="margin-top:10px; display:flex; gap:8px;">
-        <button class="secondary" id="loadDemo" style="flex:1;" title="Load a built-in sample workbook to explore the tool without uploading your own file">Load demo workbook</button>
+      <h2>Security spreadsheet</h2>
+      <div class="file-strip" id="fileStrip" style="display:none;">
+        <span class="file-strip-icon">📄</span>
+        <span class="file-strip-name" id="fileStripName"></span>
+        <button class="file-strip-change" id="fileStripChange" title="Load a different file">Change</button>
+      </div>
+      <div id="fileFullView">
+        <label class="dropzone" id="dropzone" title="Click to browse for your RBS .xlsx workbook, or drag and drop it here">
+          <input type="file" id="file" accept=".xlsx,.xls">
+          <div id="dropMsg"><strong>Drop .xlsx here</strong> or click to browse</div>
+        </label>
+        <div style="margin-top:10px; display:flex; gap:8px;">
+          <button class="secondary" id="loadDemo" style="flex:1;" title="Load a built-in sample workbook to explore the tool without uploading your own file">Load demo workbook</button>
+        </div>
       </div>
     </div>
     <div class="panel" id="queryPanel" style="display:none;">
-      <h2>Step 2 &middot; What are you checking?</h2>
+      <h2>What are you checking?</h2>
       <div class="tabs" id="tabs"></div>
       <div class="field">
         <label>Record type<span class="tip" tabindex="0" data-tip="A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.">?</span></label>
@@ -528,7 +553,7 @@ button.matrix-export { margin-left: auto; }
       </div>
     </div>
     <div class="panel" id="rolesPanel" style="display:none;">
-      <h2>Step 3 &middot; Who is the user?</h2>
+      <h2>Who is the user?</h2>
       <div class="field">
         <label>Global Parameter System fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' value in your Odessa DB.">?</span></label>
         <select id="siteLevelDefault">
@@ -543,11 +568,13 @@ button.matrix-export { margin-left: auto; }
       <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
       <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the system fallback permission you chose above.</p>
     </div>
-    <div class="panel" id="conditionsPanel" style="display:none;">
-      <h2>Step 4 &middot; Record properties</h2>
-      <p class="muted-note" style="margin-top:0;">Some permission rules only apply when the record has specific properties. Set each property below to simulate a real record.</p>
-      <div id="conditionList"></div>
-    </div>
+    <details class="panel conditions-panel" id="conditionsPanel" style="display:none;">
+      <summary>When — record properties</summary>
+      <div class="conditions-body">
+        <p class="muted-note" style="margin-top:0;">Some rules only fire when the record has specific properties. Set them below to simulate a real record.</p>
+        <div id="conditionList"></div>
+      </div>
+    </details>
     <div class="panel" id="actionPanel" style="display:none;">
       <button class="primary" id="evaluate">Evaluate permission</button>
       <button class="primary" id="generateMatrix" style="display:none;">Generate access matrix</button>
@@ -1022,6 +1049,18 @@ let matrixFilter = { text: '', levels: new Set(['F', 'M', 'R', 'N', 'X']) };
 // UI wiring
 // ============================================================
 const $ = id => document.getElementById(id);
+
+function showFileLoaded(name) {
+  $('fileStripName').textContent = name;
+  $('fileStrip').style.display = '';
+  $('fileFullView').style.display = 'none';
+}
+
+$('fileStripChange') && $('fileStripChange').addEventListener('click', () => {
+  $('fileStrip').style.display = 'none';
+  $('fileFullView').style.display = '';
+});
+
 const dropzone = $('dropzone');
 const fileInput = $('file');
 
@@ -1105,8 +1144,7 @@ function handleFile(f) {
           try {
             parsed = parseWorkbookFromSheets(msg.sheets);
             clearDropBusy();
-            $('dropMsg').innerHTML = `<strong>Loaded:</strong> ${escapeHtml(f.name)}`;
-            $('dropzone').title = `Loaded: ${f.name}. Click or drag-drop to load a different file.`;
+            showFileLoaded(f.name);
             onLoaded();
           } catch (err) {
             clearDropBusy();
@@ -1136,8 +1174,7 @@ function handleFile(f) {
 
 $('loadDemo').addEventListener('click', () => {
   parsed = buildDemoWorkbook();
-  $('dropMsg').innerHTML = '<strong>Loaded:</strong> built-in demo';
-  $('dropzone').title = 'Using the built-in demo workbook. Click or drag-drop to load your own .xlsx.';
+  showFileLoaded('built-in demo');
   onLoaded();
 });
 
@@ -1225,10 +1262,12 @@ function renderConditions() {
   list.innerHTML = '';
   if (!currentBlock || currentBlock.conditions.length === 0) {
     panel.style.display = 'none';
+    panel.open = false;
     entityState = {};
     return;
   }
   panel.style.display = '';
+  panel.open = true; // auto-expand when this block has conditions
   entityState = {}; // reset on block change
   for (const c of currentBlock.conditions) {
     const row = document.createElement('div');
