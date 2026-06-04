@@ -414,23 +414,6 @@ code.inline {
 .tip::before { content:''; position:absolute; bottom:calc(100% + 1px); left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:#1e293b; opacity:0; transition:opacity .15s; z-index:101; pointer-events:none; }
 .tip:hover::after, .tip:hover::before, .tip:focus::after, .tip:focus::before { opacity:1; }
 
-/* ── Onboarding banner ────────────────────────────────────── */
-.onboarding-banner { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px 20px; margin-bottom: 14px; font-size: 13px; line-height: 1.6; }
-.onboarding-banner h3 { margin: 0 0 8px; font-size: 14px; color: var(--text); }
-.onboarding-banner p { margin: 0; }
-.onboarding-banner p + p { margin-top: 6px; }
-.onboarding-banner .dismiss { float: right; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 0; margin: -2px -2px 0 8px; }
-.onboarding-banner .dismiss:hover { color: var(--text); }
-
-/* ── Glossary panel ───────────────────────────────────────── */
-.glossary-panel { padding: 0 !important; }
-.glossary-panel summary { cursor: pointer; padding: 12px 16px; list-style: none; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; user-select: none; }
-.glossary-panel summary::-webkit-details-marker { display: none; }
-.glossary-panel summary::before { content: '▸'; font-size: 10px; color: var(--muted); transition: transform .15s; }
-.glossary-panel[open] summary::before { transform: rotate(90deg); }
-.glossary-panel .glossary-body { padding: 0 16px 16px; font-size: 12px; }
-.glossary-panel dt { font-weight: 600; margin-top: 10px; color: var(--text); }
-.glossary-panel dd { margin: 2px 0 0 12px; color: var(--muted); line-height: 1.5; }
 
 /* ── Narrative trace output ───────────────────────────────── */
 .narrative-trace { font-size: 13px; line-height: 1.7; }
@@ -519,31 +502,6 @@ button.matrix-export { margin-left: auto; }
       <button type="button" id="modeMatrixBtn" role="tab" aria-selected="false" title="See effective permissions for every record and field in one view">Access matrix</button>
     </div>
 
-    <!-- EASY MODE: onboarding banner -->
-    <div class="onboarding-banner" id="onboardingBanner">
-      <button class="dismiss" onclick="dismissOnboarding()" title="Dismiss">&#x2715;</button>
-      <h3>What does this tool do?</h3>
-      <p>This tool answers one question: <strong>what can a specific user do on a specific record?</strong> Upload the security spreadsheet for your Odessa system (or use the demo), tell us who the user is and what you're checking — and we'll show you the answer in plain English.</p>
-      <p style="margin-top:6px; color:var(--muted); font-size:12px;">New to the terminology? Open the <strong>Glossary</strong> below, or hover the <strong>?</strong> markers next to any label.</p>
-    </div>
-
-    <!-- EASY MODE: glossary -->
-    <details class="panel glossary-panel">
-      <summary>Glossary &mdash; what do these terms mean?</summary>
-      <dl class="glossary-body">
-        <dt>F &mdash; Full</dt><dd>The user can see, edit, and do everything on this record.</dd>
-        <dt>M &mdash; Modify</dt><dd>The user can open and edit the record, but special admin actions are hidden.</dd>
-        <dt>R &mdash; Read</dt><dd>The user can open and view the record but cannot change anything.</dd>
-        <dt>N &mdash; None</dt><dd>The record is completely hidden from this user — they cannot access it at all.</dd>
-        <dt>X &mdash; Not set / undefined</dt><dd>"No specific rule here." The system keeps looking. If nothing ever resolves, it acts like None.</dd>
-        <dt>Record type / Block</dt><dd>A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.</dd>
-        <dt>Operation / Field</dt><dd>A specific action or field on the record — e.g. Amount, ApprovedBy. Leave blank to check access to the record itself.</dd>
-        <dt>Role</dt><dd>A label assigned to a user that determines what they can do. A user can have multiple roles.</dd>
-        <dt>Default permission</dt><dd>The fallback access level for a role — used when no specific rule matches. Set per role in the database.</dd>
-        <dt>System fallback</dt><dd>A site-wide setting that fills in for any role whose default is "not set" (X). Usually Full.</dd>
-        <dt>Record property / Condition</dt><dd>A fact about the specific record being accessed (e.g. "Is this invoice active?"). Some rules only apply when the record has a certain property.</dd>
-      </dl>
-    </details>
 
     <div class="panel">
       <h2>Step 1 &middot; Load the security spreadsheet</h2>
@@ -1372,12 +1330,6 @@ function setAppMode(mode) {
   $('output').style.display = single ? '' : 'none';
   $('matrixOutput').style.display = single ? 'none' : '';
   if (!single && parsed) renderMatrix();
-}
-
-function dismissOnboarding() {
-  localStorage.setItem('rbsOnboardingDismissed', '1');
-  const b = document.getElementById('onboardingBanner');
-  if (b) b.style.display = 'none';
 }
 
 // ============================================================
@@ -2247,10 +2199,6 @@ function runTests() {
   out.appendChild(panel);
 }
 
-if (localStorage.getItem('rbsOnboardingDismissed') === '1') {
-  const b = document.getElementById('onboardingBanner');
-  if (b) b.style.display = 'none';
-}
 
 // ============================================================
 // Access matrix (bulk view)
