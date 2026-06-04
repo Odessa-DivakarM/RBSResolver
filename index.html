@@ -449,7 +449,7 @@ code.inline {
 .conditions-body { padding: 0 16px 14px; }
 
 /* ── Mode toggle (Single field / Access matrix) ───────────── */
-.mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; }
+.mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; width: fit-content; min-width: 240px; }
 .mode-toggle button { background: white; border: none; padding: 8px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
 .mode-toggle button + button { border-left: 1px solid var(--border); }
 .mode-toggle button.active { background: var(--accent); color: white; }
@@ -514,11 +514,6 @@ button.matrix-export { margin-left: auto; }
 <div class="layout">
   <div class="left">
 
-    <!-- Mode toggle: Single field vs Access matrix -->
-    <div class="mode-toggle" id="modeToggle" role="tablist" aria-label="Resolver mode">
-      <button type="button" id="modeSingleBtn" class="active" role="tab" aria-selected="true" title="Evaluate one record/field at a time and see the full cascade">Single field</button>
-      <button type="button" id="modeMatrixBtn" role="tab" aria-selected="false" title="See effective permissions for every record and field in one view">Access matrix</button>
-    </div>
 
 
     <div class="panel">
@@ -585,6 +580,11 @@ button.matrix-export { margin-left: auto; }
     </div>
   </div>
   <div class="right">
+    <!-- Mode toggle: lives above the output — switches the view, not the inputs -->
+    <div class="mode-toggle" id="modeToggle" role="tablist" aria-label="Resolver mode">
+      <button type="button" id="modeSingleBtn" class="active" role="tab" aria-selected="true" title="Evaluate one record/field at a time and see the full cascade">Single field</button>
+      <button type="button" id="modeMatrixBtn" role="tab" aria-selected="false" title="See effective permissions for every record and field in one view">Access matrix</button>
+    </div>
     <div id="output">
       <div class="empty-state">
         <div class="big">No workbook loaded</div>
