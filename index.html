@@ -69,6 +69,17 @@ header.app .links .arrow { font-size: 10px; margin-left: 2px; }
   padding: 20px 28px;
   align-items: start;
 }
+.left {
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+#actionPanel {
+  position: sticky;
+  bottom: 0;
+  box-shadow: 0 -6px 16px rgba(0,0,0,.07);
+}
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
