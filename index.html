@@ -538,20 +538,6 @@ button.matrix-export { margin-left: auto; }
         </div>
       </div>
     </div>
-    <div class="panel" id="queryPanel" style="display:none;">
-      <h2>What are you checking?</h2>
-      <div class="tabs" id="tabs"></div>
-      <div class="field">
-        <label>Record type<span class="tip" tabindex="0" data-tip="A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.">?</span></label>
-        <select id="block"></select>
-      </div>
-      <div class="field">
-        <label>Specific action or field (optional)<span class="tip" tabindex="0" data-tip="A specific field or action on the record — e.g. Amount, ApprovedBy. Leave blank to check access to the record itself.">?</span></label>
-        <select id="operation">
-          <option value="">&mdash; entity-level &mdash;</option>
-        </select>
-      </div>
-    </div>
     <div class="panel" id="rolesPanel" style="display:none;">
       <h2>Who is the user?</h2>
       <div class="field">
@@ -567,6 +553,20 @@ button.matrix-export { margin-left: auto; }
       <div id="roleList"></div>
       <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
       <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the system fallback permission you chose above.</p>
+    </div>
+    <div class="panel" id="queryPanel" style="display:none;">
+      <h2>What are you checking?</h2>
+      <div class="tabs" id="tabs"></div>
+      <div class="field">
+        <label>Record type<span class="tip" tabindex="0" data-tip="A category of record in Odessa — e.g. Invoice, CreditMemo, PostInvoice. Each has its own permission rules in the spreadsheet.">?</span></label>
+        <select id="block"></select>
+      </div>
+      <div class="field">
+        <label>Specific action or field (optional)<span class="tip" tabindex="0" data-tip="A specific field or action on the record — e.g. Amount, ApprovedBy. Leave blank to check access to the record itself.">?</span></label>
+        <select id="operation">
+          <option value="">&mdash; entity-level &mdash;</option>
+        </select>
+      </div>
     </div>
     <details class="panel conditions-panel" id="conditionsPanel" style="display:none;">
       <summary>When — record properties</summary>
