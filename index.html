@@ -475,6 +475,7 @@ code.inline {
 .matrix-chip.active { border-color: var(--accent); }
 .matrix-chip .sw { width: 10px; height: 10px; border: 1px solid var(--border); border-radius: 2px; display: inline-block; }
 .matrix-chip:not(.active) { opacity: 0.45; text-decoration: line-through; }
+.matrix-hint { font-size: 12px; color: var(--muted); margin: 0 0 12px; padding: 7px 11px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 6px; }
 .matrix-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
 .matrix-tab { padding: 6px 14px; background: white; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px; }
 .matrix-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
@@ -2552,6 +2553,10 @@ function renderMatrix() {
   }
 
   host.appendChild(buildMatrixFilterBar());
+  const hint = document.createElement('div');
+  hint.className = 'matrix-hint';
+  hint.innerHTML = `💡 Click any permission cell to see <strong>why</strong> it resolved that way — it opens the full step-by-step in <strong>Trace</strong>.`;
+  host.appendChild(hint);
   host.appendChild(buildMatrixTabs());
   const body = document.createElement('div');
   body.id = 'matrixSheetBody';
