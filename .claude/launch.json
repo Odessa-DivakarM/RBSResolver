@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "RBS Resolver",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["http-server", ".", "-p", "7788", "--cors", "-c-1"],
+      "port": 7788
+    }
+  ]
+}
