@@ -520,6 +520,7 @@ table.fc-table td.fc-via { font-size: 11px; color: var(--muted); font-family: ui
 table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var(--muted); }
 .fc-table tr.fc-below-target td.fc-perm { outline: 2px solid var(--warning-border); outline-offset: -2px; }
 .fc-table tr.fc-at-target td.fc-perm { outline: 2px solid #059669; outline-offset: -2px; }
+.fc-table tr.fc-above-target td.fc-perm { outline: 2px solid var(--accent); outline-offset: -2px; }
 .fc-advisor { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
 .fc-advisor h2 { font-size: 13px; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
 .advisor-intro { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
@@ -2147,6 +2148,10 @@ function buildDemoWorkbook() {
 // ============================================================
 $('runTests').addEventListener('click', e => { e.preventDefault(); runTests(); });
 function runTests() {
+  // Results render into #output (the Trace pane). Switch to Trace mode first so they're
+  // visible — otherwise #output is hidden in Role Matrix / Field View mode and the click
+  // appears to do nothing.
+  if (appMode !== 'single') setAppMode('single');
   const out = $('output');
   out.innerHTML = '';
   const panel = document.createElement('div'); panel.className = 'panel';
@@ -2899,6 +2904,72 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   return options;
 }
 
+// Determine the controlling lever(s) to LOWER a role's effective permission down to the target.
+// Unlike raising (many ways to grant), lowering must neutralise the path that actually produced
+// the high value — and for a role contributing via both its DB default AND the * catch-all, both.
+function fieldLowerLever(block, operationName, row, targetPerm) {
+  const esc = escapeHtml;
+  const roleName = row.role;
+  const t = row.trace;
+  const tRank = PERM_RANK[targetPerm];
+  const opRow = operationName ? block.operations.find(o => o.name === operationName) : null;
+  const subst = t.substitutions.find(s => s.role === roleName);
+  const resolvedDefault = subst ? subst.resolved : normCode(row.roleDefault);
+
+  const dbAction = subst
+    ? `No controlling cell for this field — the role falls through to its DB default, currently <em>X</em> (not set), which the system substitutes with the GP fallback <strong>${resolvedDefault}</strong>. Lower the <strong>GP fallback</strong> (System config) to <strong>${targetPerm}</strong> — this lowers every role with an unset default at once — or set <strong>${esc(roleName)}.DefaultPermission</strong> explicitly to <strong>${targetPerm}</strong>.`
+    : `The role falls through to its DB default <em>${resolvedDefault}</em>. Set <strong>${esc(roleName)}.DefaultPermission</strong> to <strong>${targetPerm}</strong>.`;
+  const dbBlast = subst
+    ? `The GP fallback affects every role with an X (unset) default across all records; a per-role default change affects this role everywhere it falls through.`
+    : `Affects this role everywhere it falls through to its DB default.`;
+
+  const cellLever = (stop) => {
+    const colIdx  = parseInt(stop.cell.col.replace('col', ''), 10);
+    const isStar  = t.starColumn && ('col' + t.starColumn.columnIndex) === stop.cell.col;
+    const rowKind = stop.cell.row;
+    let cur = 'X';
+    if (rowKind === 'op' && opRow) cur = opRow.values[colIdx] || 'X';
+    else if (rowKind === 'perm')   cur = (block.permissions || [])[colIdx] || 'X';
+    const colLabel = isStar ? '*' : esc(roleName);
+    const rowLabel = rowKind === 'op' ? esc(operationName) : 'Permissions';
+    return {
+      action: `Set the <strong>${rowLabel} × ${colLabel}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>. The cascade stops here, so this cell is producing ${row.effective}.`,
+      blast: isStar
+        ? `Catch-all (*) cell — lowering it affects every role that resolves through *, not just ${esc(roleName)}.`
+        : (rowKind === 'perm'
+            ? `Affects all fields in block "${esc(block.identifier)}" for ${esc(roleName)} without a more-specific field cell.`
+            : `Affects only this field for ${esc(roleName)} in this block.`)
+    };
+  };
+
+  // Group A: single controlling lever = where its own cascade stopped.
+  if (t.groupA.length) {
+    const stop = t.groupA[0].steps.find(s => s.stop);
+    if (stop && stop.cell && stop.n !== 5) return cellLever(stop);
+    return { action: dbAction, blast: dbBlast };
+  }
+
+  // Short-circuit (Group B default already wins): DB default is the lever; the * path never ran.
+  if (t.shortCircuit) return { action: dbAction, blast: dbBlast };
+
+  // Group B (no column) / common path: effective = MAX(DB default, * catch-all). Lower whichever exceed target.
+  const commonResult = t.common ? t.common.result : 'X';
+  const commonStop   = t.common ? t.common.steps.find(s => s.stop && s.cell) : null;
+  const defAbove     = PERM_RANK[resolvedDefault] > tRank;
+  const commonAbove  = PERM_RANK[commonResult] > tRank && !!commonStop;
+
+  if (defAbove && commonAbove) {
+    const c = cellLever(commonStop);
+    return {
+      action: `${dbAction}<br><strong>And</strong> the catch-all path also gives <strong>${commonResult}</strong>: ${c.action}`,
+      blast: `${dbBlast} ${c.blast}`
+    };
+  }
+  if (defAbove)    return { action: dbAction, blast: dbBlast };
+  if (commonAbove) return cellLever(commonStop);
+  return { action: dbAction, blast: dbBlast };
+}
+
 function renderFieldMode(block, operationName, rows, targetPerm, combined) {
   const host = $('fieldOutput');
   host.innerHTML = '';
@@ -2952,8 +3023,10 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
   const tbody = tbl.createTBody();
   for (const r of rows) {
     const tr = tbody.insertRow();
-    if (targetPerm && PERM_RANK[r.effective] < PERM_RANK[targetPerm]) tr.classList.add('fc-below-target');
-    else if (targetPerm) tr.classList.add('fc-at-target');
+    if (targetPerm) {
+      const d = PERM_RANK[r.effective] - PERM_RANK[targetPerm];
+      tr.classList.add(d < 0 ? 'fc-below-target' : d > 0 ? 'fc-above-target' : 'fc-at-target');
+    }
 
     const tdRole = tr.insertCell();
     tdRole.className = 'fc-role';
@@ -2986,83 +3059,101 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
   host.appendChild(section);
 
   // ── Section 2: Change Advisor ────────────────────────────
-  if (!targetPerm) return;
+  if (!targetPerm || !combined) return;
 
   const advisor = document.createElement('div');
   advisor.className = 'fc-advisor';
-
   const advH2 = document.createElement('h2');
   advH2.textContent = 'Change Advisor';
   advisor.appendChild(advH2);
 
-  // The user is already satisfied when their COMBINED (MAX) permission meets the target —
-  // even if individual roles fall short. This is the actual system verdict.
-  const satisfied = combined && PERM_RANK[combined.final] >= PERM_RANK[targetPerm];
-  if (satisfied) {
-    const granting = rows.filter(r => PERM_RANK[r.effective] >= PERM_RANK[targetPerm]).map(r => r.role);
-    const via = granting.length ? ` (granted by ${granting.map(escapeHtml).join(', ')})` : '';
+  const tRank = PERM_RANK[targetPerm];
+  const cRank = PERM_RANK[combined.final];
+
+  // role header chip row: "<role> currently <X> → target <T>"
+  const roleHeader = (roleName, curPerm) => {
+    const hdr = document.createElement('div');
+    hdr.className = 'fc-role-block-hdr';
+    hdr.innerHTML =
+      `<span>${escapeHtml(roleName)}</span>` +
+      `<span style="color:var(--muted);font-weight:400;">currently</span>` +
+      `<span class="perm-chip cell-${curPerm}">${curPerm} — ${PERM_NAME[curPerm]}</span>` +
+      `<span style="color:var(--muted);font-weight:400;">→ target</span>` +
+      `<span class="perm-chip cell-${targetPerm}">${targetPerm} — ${PERM_NAME[targetPerm]}</span>`;
+    return hdr;
+  };
+
+  // Render a single instruction (action + optional scope note) inside a role block.
+  const appendLever = (roleBlock, letterText, action, blast, na, reason) => {
+    let optsDiv = roleBlock.querySelector('.fc-options');
+    if (!optsDiv) { optsDiv = document.createElement('div'); optsDiv.className = 'fc-options'; roleBlock.appendChild(optsDiv); }
+    const optDiv = document.createElement('div');
+    optDiv.className = 'fc-option' + (na ? ' fc-na' : '');
+    const letter = document.createElement('div');
+    letter.className = 'fc-option-letter';
+    letter.textContent = letterText;
+    optDiv.appendChild(letter);
+    const body = document.createElement('div');
+    body.className = 'fc-option-body';
+    if (na) {
+      body.textContent = reason;
+    } else {
+      body.innerHTML = action;
+      if (blast) {
+        const b = document.createElement('div');
+        b.className = 'fc-option-blast';
+        b.innerHTML = `<strong>Scope:</strong> ${blast}`;
+        body.appendChild(b);
+      }
+    }
+    optDiv.appendChild(body);
+    optsDiv.appendChild(optDiv);
+  };
+
+  const fieldLabelText = operationName ? `"${escapeHtml(operationName)}"` : `${escapeHtml(block.identifier)}`;
+
+  // On target exactly → done.
+  if (cRank === tRank) {
     const p = document.createElement('p');
     p.className = 'advisor-intro';
     p.style.color = '#059669';
-    p.innerHTML = `This user already has <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>, which meets the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>${via}. No change needed.`;
+    p.innerHTML = `This user's effective permission for ${fieldLabelText} is already exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>. No change needed.`;
     advisor.appendChild(p);
     host.appendChild(advisor);
     return;
   }
 
-  // Combined is below target ⇒ every role is individually below target. Advise on each.
-  const belowRows = rows.filter(r => PERM_RANK[r.effective] < PERM_RANK[targetPerm]);
-  const intro = document.createElement('p');
-  intro.className = 'advisor-intro';
-  intro.innerHTML = `This user's combined permission is <strong>${combined ? combined.final + ' — ' + PERM_NAME[combined.final] : '—'}</strong>, below target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. Raising any role below raises the user. Inapplicable options are greyed out.`;
-  advisor.appendChild(intro);
+  if (cRank < tRank) {
+    // ── RAISE: combined is below target ⇒ every role is below target. Raising any ONE to target is enough. ──
+    const intro = document.createElement('p');
+    intro.className = 'advisor-intro';
+    intro.innerHTML = `This user's effective permission is <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>, <strong>below</strong> target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. The result is the MAX across roles, so raising <strong>any one</strong> role to ${targetPerm} brings the user to ${targetPerm}. Inapplicable options are greyed out.`;
+    advisor.appendChild(intro);
 
-  for (const r of belowRows) {
-    const opts      = computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState);
-    const roleBlock = document.createElement('div');
-    roleBlock.className = 'fc-role-block';
-
-    const hdr = document.createElement('div');
-    hdr.className = 'fc-role-block-hdr';
-    hdr.innerHTML =
-      `<span>${escapeHtml(r.role)}</span>` +
-      `<span style="color:var(--muted);font-weight:400;">currently</span>` +
-      `<span class="perm-chip cell-${r.effective}">${r.effective} — ${PERM_NAME[r.effective]}</span>` +
-      `<span style="color:var(--muted);font-weight:400;">→ target</span>` +
-      `<span class="perm-chip cell-${targetPerm}">${targetPerm} — ${PERM_NAME[targetPerm]}</span>`;
-    roleBlock.appendChild(hdr);
-
-    const optsDiv = document.createElement('div');
-    optsDiv.className = 'fc-options';
-
-    for (const opt of opts) {
-      const optDiv = document.createElement('div');
-      optDiv.className = 'fc-option' + (opt.applicable ? '' : ' fc-na');
-
-      const letter = document.createElement('div');
-      letter.className = 'fc-option-letter';
-      letter.textContent = opt.letter;
-      optDiv.appendChild(letter);
-
-      const body = document.createElement('div');
-      body.className = 'fc-option-body';
-      if (opt.applicable) {
-        body.innerHTML = opt.action;
-        if (opt.blast) {
-          const blast = document.createElement('div');
-          blast.className = 'fc-option-blast';
-          blast.innerHTML = `<strong>Scope:</strong> ${opt.blast}`;
-          body.appendChild(blast);
-        }
-      } else {
-        body.textContent = opt.reason;
-      }
-      optDiv.appendChild(body);
-      optsDiv.appendChild(optDiv);
+    for (const r of rows.filter(r => PERM_RANK[r.effective] < tRank)) {
+      const opts      = computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState);
+      const roleBlock = document.createElement('div');
+      roleBlock.className = 'fc-role-block';
+      roleBlock.appendChild(roleHeader(r.role, r.effective));
+      for (const opt of opts) appendLever(roleBlock, opt.letter, opt.action, opt.blast, !opt.applicable, opt.reason);
+      advisor.appendChild(roleBlock);
     }
+  } else {
+    // ── LOWER: combined is above target. Because of MAX with no "deny", EVERY role above target must be lowered. ──
+    const aboveRows = rows.filter(r => PERM_RANK[r.effective] > tRank);
+    const intro = document.createElement('p');
+    intro.className = 'advisor-intro';
+    intro.innerHTML = `This user's effective permission is <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>, <strong>above</strong> target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. RBS combines roles with MAX and has no "deny", so <strong>all ${aboveRows.length} role(s) below must be lowered to ${targetPerm}</strong> — lowering only some leaves the higher ones winning. (Roles already at or below ${targetPerm} are fine.)`;
+    advisor.appendChild(intro);
 
-    roleBlock.appendChild(optsDiv);
-    advisor.appendChild(roleBlock);
+    for (const r of aboveRows) {
+      const lever     = fieldLowerLever(block, operationName, r, targetPerm);
+      const roleBlock = document.createElement('div');
+      roleBlock.className = 'fc-role-block';
+      roleBlock.appendChild(roleHeader(r.role, r.effective));
+      appendLever(roleBlock, '↓', lever.action, lever.blast, false);
+      advisor.appendChild(roleBlock);
+    }
   }
 
   host.appendChild(advisor);
