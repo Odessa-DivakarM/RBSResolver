@@ -548,6 +548,12 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 .fc-why > summary::before { content: '▸'; font-size: 9px; }
 .fc-why[open] > summary::before { content: '▾'; }
 .fc-why > div { font-size: 11px; color: var(--muted); margin-top: 3px; padding-left: 12px; border-left: 2px solid var(--border); }
+.fc-more { margin-top: 4px; }
+.fc-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--accent); list-style: none; display: inline-flex; align-items: center; gap: 5px; user-select: none; padding: 4px 0; }
+.fc-more > summary::-webkit-details-marker { display: none; }
+.fc-more > summary::before { content: '▸'; font-size: 10px; }
+.fc-more[open] > summary::before { content: '▾'; }
+.fc-more > .fc-role-block { margin-top: 8px; }
 
 </style>
 </head>
@@ -2953,13 +2959,17 @@ function fieldLowerLever(block, operationName, row, targetPerm) {
   const subst = t.substitutions.find(s => s.role === roleName);
   const resolvedDefault = subst ? subst.resolved : normCode(row.roleDefault);
 
+  // Each descriptor carries kind/groupKey so the renderer can merge roles that share one lever
+  // (e.g. several roles all riding the system-wide default, or the same shared * cell).
   const dbLever = subst
     ? {
+        kind: 'gp', groupKey: 'gp', current: resolvedDefault,
         plain: `${role} has no value of its own for this record, so it uses the <strong>system-wide default</strong> (currently <strong>${resolvedDefault}</strong>). Lower the system-wide default (System config, top-left) to ${T} — or give ${role} its own default of ${T} in the Roles table.`,
         affects: `The system-wide default lowers <em>every</em> role that has no default set, everywhere. A per-role default change affects only ${role}, but on every record it has no specific value.`,
         why: `Role.DefaultPermission is X (unset) → substituted with the system fallback ${resolvedDefault}; this is the value producing ${row.effective}.`
       }
     : {
+        kind: 'roleDefault', groupKey: 'roledef:' + roleName, current: resolvedDefault,
         plain: `${role} has no value of its own for this record, so it uses its <strong>default access level</strong> (currently <strong>${resolvedDefault}</strong>). Set ${role}'s default to ${T} in the Roles table.`,
         affects: `Affects ${role} on every record where it has no specific value.`,
         why: `Role.DefaultPermission = ${resolvedDefault} is the value producing ${row.effective}.`
@@ -2976,6 +2986,10 @@ function fieldLowerLever(block, operationName, row, targetPerm) {
     const colLabel  = isStar ? 'the shared <strong>*</strong> column' : `${role}'s column`;
     const techCell  = `${rowKind === 'op' ? esc(operationName) : 'Permissions'} × ${isStar ? '*' : esc(roleName)}`;
     return {
+      kind: isStar ? 'star' : 'roleCell',
+      groupKey: isStar ? ('star:' + rowKind + ':' + colIdx) : ('rolecell:' + roleName + ':' + rowKind + ':' + colIdx),
+      current: normCode(cur) === 'X' ? 'blank' : normCode(cur),
+      starRowLabel: rowLabel,
       plain: `On ${rowLabel}, set ${colLabel} to ${T} (currently <em>${normCode(cur) === 'X' ? 'blank' : normCode(cur)}</em>). This is the entry that's currently giving ${row.effective}.`,
       affects: isStar
         ? `The shared * column affects <em>every</em> role without its own column here — not just ${role}.`
@@ -3004,6 +3018,7 @@ function fieldLowerLever(block, operationName, row, targetPerm) {
   if (defAbove && commonAbove) {
     const c = cellLever(commonStop);
     return {
+      kind: 'both', groupKey: 'both:' + roleName, current: '',
       plain: `Two things give ${role} a high value here, and <strong>both</strong> must come down:<br>• ${dbLever.plain}<br>• ${c.plain}`,
       affects: `${dbLever.affects} ${c.affects}`,
       why: `${dbLever.why} ${c.why}`
@@ -3182,24 +3197,51 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
 
   if (cRank < tRank) {
     // ── RAISE ── combined below target ⇒ every role below target; raising any ONE to target is enough.
+    // Consolidate: lead with the single best change across all roles, tuck the rest behind "Other ways".
     const intro = document.createElement('p');
     intro.className = 'advisor-intro';
-    intro.innerHTML = `Right now this user gets <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, which is <strong>less than</strong> the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. A user always gets their most permissive role, so you only need to raise <strong>one</strong> role to ${targetPerm}. Here are the ways to do that for each role (greyed-out ones don't apply):`;
+    intro.innerHTML = `Right now this user gets <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, which is <strong>less than</strong> the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. A user always gets their most permissive role, so you only need <strong>one</strong> change:`;
     advisor.appendChild(intro);
 
-    for (const r of rows.filter(r => PERM_RANK[r.effective] < tRank)) {
-      const opts      = orderByRelevance(computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState));
+    const belowRows = rows.filter(r => PERM_RANK[r.effective] < tRank);
+    const perRole = belowRows.map(r => ({ r, opts: orderByRelevance(computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState)) }));
+
+    // Pick the single best lever across all roles: prefer works-now over needs-prep, then narrowest scope.
+    const narrow = { A: 0, B: 1, F: 2, D: 3, C: 4, E: 5 };
+    let best = null;
+    for (const { r, opts } of perRole) {
+      for (const opt of opts) {
+        if (opt.applicable === false) continue;
+        const score = tierOf(opt) * 10 + (narrow[opt.letter] ?? 9);
+        if (!best || score < best.score) best = { r, opt, score };
+      }
+    }
+
+    if (best) {
+      const headline = document.createElement('div');
+      headline.className = 'fc-role-block';
+      headline.appendChild(roleHeader(best.r.role, best.r.effective));
+      appendLever(headline, best.opt, { reco: true });
+      advisor.appendChild(headline);
+    }
+
+    // "Other ways" — full per-role breakdown for anyone who wants the alternatives.
+    const more = document.createElement('details');
+    more.className = 'fc-more';
+    more.innerHTML = `<summary>Other ways${belowRows.length > 1 ? ` (all ${belowRows.length} roles)` : ''}</summary>`;
+    for (const { r, opts } of perRole) {
       const roleBlock = document.createElement('div');
       roleBlock.className = 'fc-role-block';
       roleBlock.appendChild(roleHeader(r.role, r.effective));
       let recoGiven = false;
       for (const opt of opts) {
-        const reco = !recoGiven && tierOf(opt) === 0;
+        const reco = !recoGiven && best && r === best.r && opt === best.opt;
         if (reco) recoGiven = true;
         appendLever(roleBlock, opt, { reco });
       }
-      advisor.appendChild(roleBlock);
+      more.appendChild(roleBlock);
     }
+    advisor.appendChild(more);
   } else {
     // ── LOWER ── combined above target; because access can't be taken away, EVERY role above target must come down.
     const aboveRows = rows.filter(r => PERM_RANK[r.effective] > tRank);
@@ -3208,13 +3250,57 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
     intro.innerHTML = `Right now this user gets <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, which is <strong>more than</strong> the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. A user always gets their most permissive role and access can't be taken away, so <strong>every</strong> role above ${targetPerm} has to be brought down — bringing down only some won't help. ${aboveRows.length} role(s) need lowering (the rest are already fine):`;
     advisor.appendChild(intro);
 
-    for (const r of aboveRows) {
-      const lever     = fieldLowerLever(block, operationName, r, targetPerm);
-      const roleBlock = document.createElement('div');
-      roleBlock.className = 'fc-role-block';
-      roleBlock.appendChild(roleHeader(r.role, r.effective));
-      appendLever(roleBlock, { applicable: true, precondition: lever.precondition, plain: lever.plain, affects: lever.affects, why: lever.why }, { marker: '↓' });
-      advisor.appendChild(roleBlock);
+    // Group roles that share the same lever (e.g. all riding the system-wide default, or the same
+    // shared * cell) into one card, so the same instruction isn't repeated per role.
+    const descs  = aboveRows.map(r => ({ r, d: fieldLowerLever(block, operationName, r, targetPerm) }));
+    const groups = [];
+    const byKey  = new Map();
+    for (const x of descs) {
+      if (byKey.has(x.d.groupKey)) { byKey.get(x.d.groupKey).members.push(x); }
+      else { const g = { key: x.d.groupKey, members: [x] }; byKey.set(x.d.groupKey, g); groups.push(g); }
+    }
+    groups.sort((a, b) => b.members.length - a.members.length); // biggest coverage first
+
+    for (const g of groups) {
+      const kind   = g.members[0].d.kind;
+      const roles  = g.members.map(m => m.r.role);
+      const shared = g.members.length > 1 && (kind === 'gp' || kind === 'star');
+      const card   = document.createElement('div');
+      card.className = 'fc-role-block';
+
+      // Header: one role keeps its current→target chips; a shared group lists the covered roles.
+      if (g.members.length === 1) {
+        card.appendChild(roleHeader(g.members[0].r.role, g.members[0].r.effective));
+      } else {
+        const hdr = document.createElement('div');
+        hdr.className = 'fc-role-block-hdr';
+        hdr.innerHTML = `<span>${roles.map(escapeHtml).join(', ')}</span>` +
+          `<span style="color:var(--muted);font-weight:400;">→ target</span>` +
+          `<span class="perm-chip cell-${targetPerm}">${targetPerm} — ${PERM_NAME[targetPerm]}</span>`;
+        card.appendChild(hdr);
+      }
+
+      let lever;
+      if (shared && kind === 'gp') {
+        const gp = g.members[0].d.current;
+        lever = {
+          plain: `Lower the <strong>system-wide default</strong> (System config, top-left) to ${`<strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>`} (currently <strong>${gp}</strong>). One change covers all ${roles.length}: ${roles.map(escapeHtml).join(', ')}.`,
+          affects: `Lowers every role with no default set, everywhere. (Alternatively, set each role's own default to ${targetPerm} individually.)`,
+          why: `These roles have no value of their own here and no default set, so they all use the system-wide default ${gp}.`
+        };
+      } else if (shared && kind === 'star') {
+        const d0 = g.members[0].d;
+        lever = {
+          plain: `On the shared <strong>*</strong> column, set ${d0.starRowLabel} to ${`<strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>`} (currently <em>${d0.current}</em>). One change covers: ${roles.map(escapeHtml).join(', ')}.`,
+          affects: `The shared * column affects every role without its own column here.`,
+          why: d0.why
+        };
+      } else {
+        lever = g.members[0].d; // single role / unique lever — use its own wording
+      }
+
+      appendLever(card, { applicable: true, precondition: lever.precondition, plain: lever.plain, affects: lever.affects, why: lever.why }, { marker: '↓' });
+      advisor.appendChild(card);
     }
   }
 
