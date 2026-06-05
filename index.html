@@ -526,8 +526,11 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 .advisor-intro { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
 .fc-role-block { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; background: #fafbfc; }
 .fc-role-block-hdr { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.fc-options { padding: 10px 12px 6px; }
-.fc-option { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; margin-bottom: 10px; align-items: start; }
+.fc-options { padding: 10px 12px 12px; }
+.fc-option { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; margin-bottom: 8px; align-items: start; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.fc-option:last-child { margin-bottom: 0; }
+.fc-option.fc-recommended { border-color: #059669; box-shadow: 0 0 0 1px #05966933; }
+.fc-option.fc-na { background: transparent; border-style: dashed; }
 .fc-option-letter { font-size: 13px; font-weight: 700; color: var(--accent); padding-top: 1px; text-align: center; }
 .fc-option-letter.fc-mark-do { color: #059669; }
 .fc-option-letter.fc-mark-cond { color: var(--warning-border); }
@@ -3134,7 +3137,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
     if (!optsDiv) { optsDiv = document.createElement('div'); optsDiv.className = 'fc-options'; roleBlock.appendChild(optsDiv); }
     const tier = tierOf(lever);
     const optDiv = document.createElement('div');
-    optDiv.className = 'fc-option' + (tier === 2 ? ' fc-na' : '');
+    optDiv.className = 'fc-option' + (tier === 2 ? ' fc-na' : '') + (extra.reco ? ' fc-recommended' : '');
     const mark = document.createElement('div');
     const markCls = tier === 0 ? 'fc-mark-do' : tier === 1 ? 'fc-mark-cond' : 'fc-mark-na';
     mark.className = 'fc-option-letter ' + markCls;
