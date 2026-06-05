@@ -1378,9 +1378,17 @@ function setAppMode(mode) {
   $('modeMatrixBtn').classList.toggle('active', !single);
   $('modeSingleBtn').setAttribute('aria-selected', single ? 'true' : 'false');
   $('modeMatrixBtn').setAttribute('aria-selected', single ? 'false' : 'true');
-  // Update empty state guidance when mode switches and no result is shown yet
+  // Update empty state guidance in whichever container the mode actually shows
   const out = $('output');
-  if (out.querySelector('.empty-state')) out.innerHTML = modeEmptyState(!!parsed);
+  const mx  = $('matrixOutput');
+  if (single) {
+    // Single field uses #output — update it if still showing guidance
+    if (out.querySelector('.empty-state')) out.innerHTML = modeEmptyState(!!parsed);
+  } else if (!parsed) {
+    // Matrix uses #matrixOutput — populate with guidance when no data loaded yet
+    mx.innerHTML = modeEmptyState(false);
+  }
+  // If parsed, renderMatrix() below will populate #matrixOutput
   // Hide Step 2 (block/op pick) and Step 4 (conditions) in matrix mode
   if (parsed) {
     $('queryPanel').style.display = single ? '' : 'none';
