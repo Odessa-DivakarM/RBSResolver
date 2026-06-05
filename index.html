@@ -400,6 +400,7 @@ table.sheet td.row-name {
   border-radius: 8px;
 }
 .empty-state .big { font-size: 14px; margin-bottom: 6px; font-weight: 600; color: var(--text); }
+.empty-state-hint { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.7; }
 .test-results {
   font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
   font-size: 12px;
@@ -593,13 +594,14 @@ button.matrix-export { margin-left: auto; }
   <div class="right">
     <!-- Mode toggle: lives above the output — switches the view, not the inputs -->
     <div class="mode-toggle" id="modeToggle" role="tablist" aria-label="Resolver mode">
-      <button type="button" id="modeSingleBtn" class="active" role="tab" aria-selected="true" title="Evaluate one record/field at a time and see the full cascade">Single field</button>
-      <button type="button" id="modeMatrixBtn" role="tab" aria-selected="false" title="See effective permissions for every record and field in one view">Access matrix</button>
+      <button type="button" id="modeMatrixBtn" class="active" role="tab" aria-selected="true" title="See effective permissions for every record and field in one view">Access matrix</button>
+      <button type="button" id="modeSingleBtn" role="tab" aria-selected="false" title="Evaluate one record/field at a time and see the full cascade">Single field</button>
     </div>
     <div id="output">
       <div class="empty-state">
-        <div class="big">No workbook loaded</div>
-        Upload an RBS .xlsx file or click <em>Load demo workbook</em> on the left to begin.
+        <div class="big">Access matrix</div>
+        See all permissions for a user across every record — at once.
+        <div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.<br>Load a workbook on the left to begin.</div>
       </div>
     </div>
     <div id="matrixOutput" style="display:none;"></div>
@@ -1054,7 +1056,7 @@ const userRoles = [];
 let entityState = {}; // { conditionName: 'T' | 'F' | undefined }
 
 // Access-matrix state
-let appMode = 'single'; // 'single' | 'matrix'
+let appMode = 'matrix'; // 'single' | 'matrix'
 let matrixSheet = 'Entities';
 const matrixConditionStates = new Map(); // key: `${sheet}:${blockIdx}` -> { [condName]: 'T' | 'F' }
 let matrixFilter = { text: '', levels: new Set(['F', 'M', 'R', 'N', 'X']) };
@@ -1204,11 +1206,7 @@ function onLoaded() {
   if (userRoles.length === 0) addRoleRow();
   renderRoles();
   selectSheet('Entities');
-  $('output').innerHTML = `
-    <div class="empty-state">
-      <div class="big">Workbook loaded</div>
-      Pick a sheet, block, and roles, then click <em>Evaluate permission</em>.
-    </div>`;
+  $('output').innerHTML = modeEmptyState(true);
   // Re-apply mode visibility — onLoaded turns everything on by default,
   // but matrix mode wants Step 2 and Step 4 hidden.
   setAppMode(appMode);
@@ -1361,6 +1359,18 @@ $('modeSingleBtn').addEventListener('click', () => setAppMode('single'));
 $('modeMatrixBtn').addEventListener('click', () => setAppMode('matrix'));
 $('generateMatrix').addEventListener('click', () => renderMatrix());
 
+function modeEmptyState(loaded) {
+  if (appMode === 'matrix') {
+    return loaded
+      ? `<div class="empty-state"><div class="big">Access matrix</div>Set the user's roles on the left, then click <em>Generate access matrix</em>.<div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.</div></div>`
+      : `<div class="empty-state"><div class="big">Access matrix</div>See all permissions for a user across every record — at once.<div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.<br>Load a workbook on the left to begin.</div></div>`;
+  } else {
+    return loaded
+      ? `<div class="empty-state"><div class="big">Single field</div>Pick a record and field on the left, then click <em>Evaluate permission</em>.<div class="empty-state-hint">Best for investigating why a user can or can't access something specific — shows the full decision trail.</div></div>`
+      : `<div class="empty-state"><div class="big">Single field</div>Trace exactly why a user can or can't access a specific record or field.<div class="empty-state-hint">Best for investigating a specific access complaint or debugging a permission issue.<br>Load a workbook on the left to begin.</div></div>`;
+  }
+}
+
 function setAppMode(mode) {
   appMode = mode;
   const single = mode === 'single';
@@ -1368,6 +1378,9 @@ function setAppMode(mode) {
   $('modeMatrixBtn').classList.toggle('active', !single);
   $('modeSingleBtn').setAttribute('aria-selected', single ? 'true' : 'false');
   $('modeMatrixBtn').setAttribute('aria-selected', single ? 'false' : 'true');
+  // Update empty state guidance when mode switches and no result is shown yet
+  const out = $('output');
+  if (out.querySelector('.empty-state')) out.innerHTML = modeEmptyState(!!parsed);
   // Hide Step 2 (block/op pick) and Step 4 (conditions) in matrix mode
   if (parsed) {
     $('queryPanel').style.display = single ? '' : 'none';
