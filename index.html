@@ -2355,22 +2355,161 @@ function runTests() {
       roles: [{ name: 'Account Manager', defaultPermission: 'N' }],
       entity: { IsActive: 'F' },
       expected: 'F' // 'T' is invalid Bool3 → X → AM column always matches → F
+    },
+    {
+      name: 'Test 18 — Two Group B roles → MAX of their defaults (M, R) = M',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['N', 'N'], []),
+      op: null,
+      roles: [{ name: 'Sales Manager', defaultPermission: 'M' }, { name: 'Clerk', defaultPermission: 'R' }],
+      expected: 'M'
+    },
+    {
+      name: 'Test 19 — Operation not in sheet → falls back to block Permissions (AM=N) → N',
+      block: makeBlock('B', '', ['*', 'Account Manager'], ['F', 'N'], [{ name: 'Amount', values: ['X', 'X'] }]),
+      op: 'GhostField',
+      roles: [{ name: 'Account Manager', defaultPermission: 'F' }],
+      expected: 'N'
     }
   ];
 
-  let passed = 0;
-  for (const tc of tests) {
-    const r = evaluate(tc.block, tc.op, tc.roles, tc.site || 'F', tc.entity || {});
-    const ok = r.final === tc.expected;
-    if (ok) passed++;
-    const div = document.createElement('div');
-    div.className = ok ? 'pass' : 'fail';
-    div.textContent = `${ok ? 'PASS' : 'FAIL'} · ${tc.name} · got ${r.final}, expected ${tc.expected}`;
-    log.appendChild(div);
+  // ── Test helpers (Field View): clone a block and apply a structured advisor change ──
+  function cloneBlockT(b) {
+    return {
+      ...b,
+      roleColumns: b.roleColumns.map(rc => ({ ...rc, conditionValues: rc.conditionValues.slice() })),
+      conditions:  b.conditions.map(c => ({ ...c, values: c.values.slice() })),
+      permissions: b.permissions.slice(),
+      operations:  b.operations.map(o => ({ ...o, values: o.values.slice() }))
+    };
   }
+  function applyChangeT(state, ch) {
+    const block = cloneBlockT(state.block);
+    let roles = state.roles.map(r => ({ ...r }));
+    let site = state.site;
+    if (ch.kind === 'permCell')        block.permissions[ch.col] = normCode(ch.value);
+    else if (ch.kind === 'opCell')   { const op = block.operations.find(o => o.name === ch.op); if (op) op.values[ch.col] = normCode(ch.value); }
+    else if (ch.kind === 'roleDefault') roles.forEach(r => { if (r.name === ch.role) r.defaultPermission = ch.value; });
+    else if (ch.kind === 'gp')         site = ch.value;
+    else if (ch.kind === 'addColumn') {
+      const idx = block.roleColumns.length;
+      block.roleColumns.push({ name: ch.role, colIndex: idx + 1, columnIndex: idx, conditionValues: block.conditions.map(() => 'X') });
+      block.permissions.push('X');
+      block.operations.forEach(o => o.values.push('X'));
+      if (ch.row === 'op') { const op = block.operations.find(o => o.name === ch.op); if (op) op.values[idx] = normCode(ch.value); }
+      else                   block.permissions[idx] = normCode(ch.value);
+    }
+    return { block, roles, site };
+  }
+  const applyAllT = (state, changes) => (Array.isArray(changes) ? changes : [changes]).reduce((s, c) => applyChangeT(s, c), state);
+  const hasColumnHolderT = (block, roles, entity) => {
+    const m = new Set(block.roleColumns.filter(rc => rc.name !== '*' && columnMatches(rc, block.conditions, entity)).map(rc => rc.name));
+    return roles.some(r => m.has(r.name));
+  };
+  const mkRoles = (pairs) => pairs.map(([n, d]) => ({ name: n, defaultPermission: d }));
+  const FB = (perms, ops, conds) => makeBlock('T', '', ['*', 'Account Manager', 'Sales Manager'], perms, ops || [], conds);
+
+  // ── Group runner ──
+  function runGroup(title, cases, runOne) {
+    const h = document.createElement('div');
+    h.style.cssText = 'font-weight:600; margin:14px 0 4px; color:var(--muted);';
+    h.textContent = title;
+    log.appendChild(h);
+    let p = 0;
+    for (const tc of cases) {
+      let ok = false, detail = '';
+      try { const res = runOne(tc); ok = res.ok; detail = res.detail; }
+      catch (e) { ok = false; detail = 'threw: ' + e.message; }
+      if (ok) p++;
+      const div = document.createElement('div');
+      div.className = ok ? 'pass' : 'fail';
+      div.textContent = `${ok ? 'PASS' : 'FAIL'} · ${tc.name} · ${detail}`;
+      log.appendChild(div);
+    }
+    return { passed: p, total: cases.length };
+  }
+
+  // ── INVARIANT: MAX(table rows) === combined permission, across role-set shapes ──
+  const invariantCases = [
+    { name: 'mixed column-holder + column-less', block: FB(['F', 'N', 'X']), op: null, roles: [['Account Manager', 'N'], ['Clerk', 'R']], site: 'F' },
+    { name: 'all column-less pick up *',          block: FB(['F', 'N', 'X']), op: null, roles: [['Clerk', 'R'], ['Temp', 'N']], site: 'F' },
+    { name: 'all-X demo-like',                    block: FB(['F', 'N', 'X']), op: null, roles: [['Account Manager', 'X'], ['Sales Manager', 'X'], ['Clerk', 'X']], site: 'F' },
+    { name: 'short-circuit (Group B default F)',  block: FB(['R', 'N', 'X']), op: null, roles: [['Account Manager', 'N'], ['Clerk', 'F']], site: 'R' },
+    { name: 'field-level mixed',                  block: FB(['F', 'N', 'X'], [{ name: 'Amount', values: ['X', 'X', 'X'] }]), op: 'Amount', roles: [['Account Manager', 'N'], ['Clerk', 'R']], site: 'F' },
+    { name: 'conditional column filtered out',    block: FB(['R', 'F', 'X'], [], [{ name: 'IsActive', values: ['X', 'Y', 'X'] }]), op: null, roles: [['Account Manager', 'N']], site: 'F', entity: { IsActive: 'F' } }
+  ];
+  const runInvariant = (tc) => {
+    const roles = mkRoles(tc.roles), entity = tc.entity || {};
+    const rows = computeFieldCoverageRows(tc.block, tc.op, roles, tc.site, entity);
+    const combined = evaluate(tc.block, tc.op, roles, tc.site, entity).final;
+    const maxRow = rows.reduce((m, r) => PERM_RANK[r.effective] > PERM_RANK[m] ? r.effective : m, 'X');
+    return { ok: maxRow === combined, detail: `MAX(rows)=${maxRow}, combined=${combined}` };
+  };
+
+  // ── REACHABILITY (raise): applying the recommended change lands the user exactly on target ──
+  const tierT = (o) => o.applicable === false ? 2 : (o.precondition ? 1 : 0);
+  const raiseCases = [
+    { name: 'raise via own Permissions cell',     block: FB(['F', 'N', 'X']), op: null, roles: [['Account Manager', 'N']], target: 'F', site: 'F' },
+    { name: 'raise via field cell',               block: FB(['F', 'N', 'X'], [{ name: 'Amount', values: ['X', 'N', 'X'] }]), op: 'Amount', roles: [['Account Manager', 'N']], target: 'F', site: 'F' },
+    { name: 'raise column-less via add column',   block: FB(['N', 'N', 'X']), op: null, roles: [['Clerk', 'N']], target: 'M', site: 'N' }
+  ];
+  const runRaise = (tc) => {
+    const roles = mkRoles(tc.roles), entity = tc.entity || {};
+    const hasCH = hasColumnHolderT(tc.block, roles, entity);
+    const rows = computeFieldCoverageRows(tc.block, tc.op, roles, tc.site, entity);
+    const below = rows.filter(r => PERM_RANK[r.effective] < PERM_RANK[tc.target]);
+    const narrow = { A: 0, B: 1, F: 2, D: 3, C: 4, E: 5 };
+    let best = null;
+    for (const r of below) {
+      const opts = computeChangeOptions(tc.block, tc.op, r.role, r.roleDefault, tc.target, tc.site, entity, hasCH);
+      for (const o of opts) {
+        if (o.applicable === false || !o.apply) continue;
+        const sc = tierT(o) * 10 + (narrow[o.letter] ?? 9);
+        if (!best || sc < best.sc) best = { apply: o.apply, sc, letter: o.letter };
+      }
+    }
+    if (!best) return { ok: false, detail: 'no applicable recommendation' };
+    const st = applyAllT({ block: tc.block, roles, site: tc.site }, best.apply);
+    const after = evaluate(st.block, tc.op, st.roles, st.site, entity).final;
+    return { ok: after === tc.target, detail: `rec=${best.letter} → combined ${after} (want ${tc.target})` };
+  };
+
+  // ── REACHABILITY (lower): applying ALL grouped lower levers lands the user on target ──
+  const lowerCases = [
+    { name: 'lower all-X via system default', block: FB(['F', 'N', 'X']), op: null, roles: [['Account Manager', 'X'], ['Sales Manager', 'X'], ['Clerk', 'X']], target: 'M', site: 'F' },
+    { name: 'lower own Permissions cell',      block: FB(['F', 'F', 'X']), op: null, roles: [['Account Manager', 'F']], target: 'R', site: 'F' }
+  ];
+  const runLower = (tc) => {
+    const roles = mkRoles(tc.roles), entity = tc.entity || {};
+    const hasCH = hasColumnHolderT(tc.block, roles, entity);
+    const rows = computeFieldCoverageRows(tc.block, tc.op, roles, tc.site, entity);
+    const above = rows.filter(r => PERM_RANK[r.effective] > PERM_RANK[tc.target]);
+    let st = { block: tc.block, roles, site: tc.site };
+    const seen = new Set();
+    for (const r of above) {
+      const d = fieldLowerLever(tc.block, tc.op, r, tc.target, hasCH);
+      if (seen.has(d.groupKey)) continue;
+      seen.add(d.groupKey);
+      if (d.apply) st = applyAllT(st, d.apply);
+    }
+    const after = evaluate(st.block, tc.op, st.roles, st.site, entity).final;
+    return { ok: after === tc.target, detail: `combined ${after} (want ${tc.target})` };
+  };
+
+  // ── Run all groups ──
+  const groups = [
+    runGroup('Core algorithm', tests, tc => {
+      const r = evaluate(tc.block, tc.op, tc.roles, tc.site || 'F', tc.entity || {});
+      return { ok: r.final === tc.expected, detail: `got ${r.final}, expected ${tc.expected}` };
+    }),
+    runGroup('Field View — MAX(rows) == combined', invariantCases, runInvariant),
+    runGroup('Advisor — raising reaches target', raiseCases, runRaise),
+    runGroup('Advisor — lowering reaches target', lowerCases, runLower)
+  ];
+  const tp = groups.reduce((s, g) => s + g.passed, 0);
+  const tt = groups.reduce((s, g) => s + g.total, 0);
   const summary = document.createElement('div');
-  summary.className = 'summary ' + (passed === tests.length ? 'pass' : 'fail');
-  summary.textContent = `${passed} / ${tests.length} passed`;
+  summary.className = 'summary ' + (tp === tt ? 'pass' : 'fail');
+  summary.textContent = `${tp} / ${tt} passed`;
   log.appendChild(summary);
   out.appendChild(panel);
 }
@@ -2893,6 +3032,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   } else {
     options.push({
       letter: 'A', applicable: true,
+      apply:  { kind: 'opCell', op: operationName, col: matchedCol.columnIndex, value: targetPerm },
       plain:  `On the ${fld} row, set ${role}'s cell to ${T}. (Currently ${cur(opRow.values[matchedCol.columnIndex])}.)`,
       affects:`Just this one field for ${role} on this record — the most precise change.`,
       why:    `Field row × ${esc(roleName)} column. It's the first thing the resolver reads for this field, so it decides the result outright.`
@@ -2905,6 +3045,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   } else {
     options.push({
       letter: 'B', applicable: true,
+      apply:  { kind: 'permCell', col: matchedCol.columnIndex, value: targetPerm },
       precondition: precondition(3),
       plain:  `On the <strong>Permissions</strong> row, set ${role}'s cell to ${T}. (Currently ${cur(perms[matchedCol.columnIndex])}.)`,
       affects:`Every field on this record for ${role} that doesn't have its own value.`,
@@ -2919,6 +3060,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
     : ` (currently ${cur(roleDefault)}.)`;
   options.push({
     letter: 'C', applicable: true,
+    apply:  { kind: 'roleDefault', role: roleName, value: targetPerm },
     precondition: precondition(5),
     plain:  `Change ${role}'s <strong>default access level</strong> (in the Roles table) to ${T}.${curDef}`,
     affects:`This role on <em>every</em> record where it has no specific value — not just this one. Usually too broad to fix a single field.`,
@@ -2942,6 +3084,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
     const starVal = dStarStep === 2 && opRow ? opRow.values[starIdx] : perms[starIdx];
     options.push({
       letter: 'D', applicable: true,
+      apply:  dStarStep === 2 ? { kind: 'opCell', op: operationName, col: starIdx, value: targetPerm } : { kind: 'permCell', col: starIdx, value: targetPerm },
       precondition: precondition(dStarStep),
       plain:  `On the shared <strong>*</strong> column, set the ${onRow} cell to ${T}. (Currently ${cur(starVal)}.)`,
       affects:`Every role that relies on the shared column (anyone without their own column here) — not just ${role}.`,
@@ -2968,6 +3111,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   } else {
     options.push({
       letter: 'F', applicable: true,
+      apply:  { kind: 'addColumn', role: roleName, row: operationName ? 'op' : 'perm', op: operationName, value: targetPerm },
       plain:  `Give ${role} its own column on this record and set its ${operationName ? fld + ' value' : 'Permissions value'} to ${T}.`,
       affects:`Only ${role} on this record — the cleanest fix when a role has no column yet.`,
       why:    `Adds a dedicated column so ${esc(roleName)} no longer falls back to the shared * column or its default here.`
@@ -2996,12 +3140,14 @@ function fieldLowerLever(block, operationName, row, targetPerm, hasColumnHolder)
   const dbLever = subst
     ? {
         kind: 'gp', groupKey: 'gp', current: resolvedDefault,
+        apply: { kind: 'gp', value: targetPerm },
         plain: `${role} has no value of its own for this record, so it uses the <strong>system-wide default</strong> (currently <strong>${resolvedDefault}</strong>). Lower the system-wide default (System config, top-left) to ${T} — or give ${role} its own default of ${T} in the Roles table.`,
         affects: `The system-wide default lowers <em>every</em> role that has no default set, everywhere. A per-role default change affects only ${role}, but on every record it has no specific value.`,
         why: `Role.DefaultPermission is X (unset) → substituted with the system fallback ${resolvedDefault}; this is the value producing ${row.effective}.`
       }
     : {
         kind: 'roleDefault', groupKey: 'roledef:' + roleName, current: resolvedDefault,
+        apply: { kind: 'roleDefault', role: roleName, value: targetPerm },
         plain: `${role} has no value of its own for this record, so it uses its <strong>default access level</strong> (currently <strong>${resolvedDefault}</strong>). Set ${role}'s default to ${T} in the Roles table.`,
         affects: `Affects ${role} on every record where it has no specific value.`,
         why: `Role.DefaultPermission = ${resolvedDefault} is the value producing ${row.effective}.`
@@ -3021,6 +3167,7 @@ function fieldLowerLever(block, operationName, row, targetPerm, hasColumnHolder)
       kind: isStar ? 'star' : 'roleCell',
       groupKey: isStar ? ('star:' + rowKind + ':' + colIdx) : ('rolecell:' + roleName + ':' + rowKind + ':' + colIdx),
       current: normCode(cur) === 'X' ? 'blank' : normCode(cur),
+      apply: { kind: rowKind === 'op' ? 'opCell' : 'permCell', op: operationName, col: colIdx, value: targetPerm },
       starRowLabel: rowLabel,
       plain: `On ${rowLabel}, set ${colLabel} to ${T} (currently <em>${normCode(cur) === 'X' ? 'blank' : normCode(cur)}</em>). This is the entry that's currently giving ${row.effective}.`,
       affects: isStar
@@ -3055,6 +3202,7 @@ function fieldLowerLever(block, operationName, row, targetPerm, hasColumnHolder)
     const c = cellLever(commonStop);
     return {
       kind: 'both', groupKey: 'both:' + roleName, current: '',
+      apply: [dbLever.apply, c.apply],
       plain: `Two things give ${role} a high value here, and <strong>both</strong> must come down:<br>• ${dbLever.plain}<br>• ${c.plain}`,
       affects: `${dbLever.affects} ${c.affects}`,
       why: `${dbLever.why} ${c.why}`
