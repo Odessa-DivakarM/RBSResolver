@@ -475,7 +475,10 @@ code.inline {
 .matrix-chip.active { border-color: var(--accent); }
 .matrix-chip .sw { width: 10px; height: 10px; border: 1px solid var(--border); border-radius: 2px; display: inline-block; }
 .matrix-chip:not(.active) { opacity: 0.45; text-decoration: line-through; }
-.matrix-hint { font-size: 12px; color: var(--muted); margin: 0 0 12px; padding: 7px 11px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 6px; }
+.matrix-hint { font-size: 12px; color: var(--muted); margin: 0 0 12px; padding: 7px 11px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 6px; display: flex; align-items: center; gap: 10px; }
+.matrix-hint .hint-text { flex: 1; }
+.matrix-hint .hint-close { flex-shrink: 0; background: none; border: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; border-radius: 4px; }
+.matrix-hint .hint-close:hover { color: var(--accent); }
 .matrix-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
 .matrix-tab { padding: 6px 14px; background: white; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px; }
 .matrix-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
@@ -2545,6 +2548,21 @@ function evaluateBlockRows(block, blockConditions) {
   return rows;
 }
 
+// A one-line tip with a dismiss "×". Once dismissed it stays gone (localStorage),
+// so the hint educates first-timers without permanently eating screen space.
+function dismissibleHint(key, html) {
+  const storeKey = 'rbsHint:' + key;
+  try { if (localStorage.getItem(storeKey) === 'dismissed') return null; } catch (e) {}
+  const el = document.createElement('div');
+  el.className = 'matrix-hint';
+  el.innerHTML = `<span class="hint-text">${html}</span><button type="button" class="hint-close" title="Dismiss this tip" aria-label="Dismiss">&times;</button>`;
+  el.querySelector('.hint-close').addEventListener('click', () => {
+    try { localStorage.setItem(storeKey, 'dismissed'); } catch (e) {}
+    el.remove();
+  });
+  return el;
+}
+
 function renderMatrix() {
   const host = $('matrixOutput');
   host.innerHTML = '';
@@ -2554,10 +2572,8 @@ function renderMatrix() {
   }
 
   host.appendChild(buildMatrixFilterBar());
-  const hint = document.createElement('div');
-  hint.className = 'matrix-hint';
-  hint.innerHTML = `💡 Click any permission cell to see <strong>why</strong> it resolved that way — it opens the full step-by-step in <strong>Trace</strong>.`;
-  host.appendChild(hint);
+  const hint = dismissibleHint('matrixDrill', `💡 Click any permission cell to see <strong>why</strong> it resolved that way — it opens the full step-by-step in <strong>Trace</strong>.`);
+  if (hint) host.appendChild(hint);
   host.appendChild(buildMatrixTabs());
   const body = document.createElement('div');
   body.id = 'matrixSheetBody';
@@ -3253,10 +3269,11 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
         `<span class="fc-summary-why">see why &rarr;</span>` +
       `</button>` +
       (rows.length > 1 ? `<span style="color:var(--muted);">— the most permissive of their ${rows.length} roles</span>` : '') +
-      `</div>` +
-      `<div class="matrix-hint" style="margin-top:10px;">💡 Click the result to open the full step-by-step explanation in <strong>Trace</strong>.</div>`;
+      `</div>`;
     host.appendChild(summary);
     summary.querySelector('.fc-summary-link').addEventListener('click', drillFieldToTrace);
+    const fh = dismissibleHint('fieldDrill', `💡 Click the result to open the full step-by-step explanation in <strong>Trace</strong>.`);
+    if (fh) { fh.style.marginTop = '10px'; summary.appendChild(fh); }
   }
 
   // ── Section 1: Role Access Table ─────────────────────────
