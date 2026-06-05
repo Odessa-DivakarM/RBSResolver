@@ -528,7 +528,11 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 .fc-role-block-hdr { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .fc-options { padding: 10px 12px 6px; }
 .fc-option { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; margin-bottom: 10px; align-items: start; }
-.fc-option-letter { font-size: 11px; font-weight: 700; color: var(--accent); padding-top: 1px; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
+.fc-option-letter { font-size: 13px; font-weight: 700; color: var(--accent); padding-top: 1px; text-align: center; }
+.fc-option-letter.fc-mark-do { color: #059669; }
+.fc-option-letter.fc-mark-cond { color: var(--warning-border); }
+.fc-option-letter.fc-mark-na { color: var(--muted); }
+.fc-reco { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #fff; background: #059669; border-radius: 10px; padding: 1px 7px; margin-right: 6px; vertical-align: middle; }
 .fc-option-body { font-size: 12px; line-height: 1.6; }
 .fc-option-blast { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .fc-option.fc-na { opacity: 0.45; }
@@ -2843,7 +2847,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
 
   // A — set this field's cell for the role's own column
   if (!operationName) {
-    options.push({ letter: 'A', applicable: false, reason: 'Pick a specific field first — this option changes a single field. (Or use B for the whole record.)' });
+    options.push({ letter: 'A', applicable: false, reason: 'Pick a specific field first — this option changes a single field. (Or change the whole record below.)' });
   } else if (!opRow) {
     options.push({ letter: 'A', applicable: false, reason: `There's no ${fld} row for this record in the sheet — it would have to be added first.` });
   } else if (!matchedCol) {
@@ -2859,7 +2863,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
 
   // B — set the Permissions-row cell for the role's own column
   if (!matchedCol) {
-    options.push({ letter: 'B', applicable: false, reason: `${esc(roleName)} doesn't have its own column on this record, so there's nothing to set on the Permissions row. Use C or F instead.` });
+    options.push({ letter: 'B', applicable: false, reason: `${esc(roleName)} doesn't have its own column on this record, so there's nothing to set on the Permissions row. Change its default access level, or give it its own column (below).` });
   } else {
     options.push({
       letter: 'B', applicable: true,
@@ -3120,31 +3124,44 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
     return hdr;
   };
 
-  // Render one lever inside a role block: optional warning, the plain instruction,
-  // an "Also affects" note, and a collapsible plain-English "Why?" with the mechanics.
-  const appendLever = (roleBlock, letterText, lever) => {
+  // Relevance tier: 0 = works right now, 1 = works after a prep step, 2 = doesn't apply.
+  const tierOf = (o) => o.applicable === false ? 2 : (o.precondition ? 1 : 0);
+
+  // Render one lever inside a role block: a relevance marker, optional warning, the plain
+  // instruction, an "Also affects" note, and a collapsible plain-English "Why?".
+  const appendLever = (roleBlock, lever, extra = {}) => {
     let optsDiv = roleBlock.querySelector('.fc-options');
     if (!optsDiv) { optsDiv = document.createElement('div'); optsDiv.className = 'fc-options'; roleBlock.appendChild(optsDiv); }
+    const tier = tierOf(lever);
     const optDiv = document.createElement('div');
-    optDiv.className = 'fc-option' + (lever.applicable === false ? ' fc-na' : '');
-    const letter = document.createElement('div');
-    letter.className = 'fc-option-letter';
-    letter.textContent = letterText;
-    optDiv.appendChild(letter);
+    optDiv.className = 'fc-option' + (tier === 2 ? ' fc-na' : '');
+    const mark = document.createElement('div');
+    const markCls = tier === 0 ? 'fc-mark-do' : tier === 1 ? 'fc-mark-cond' : 'fc-mark-na';
+    mark.className = 'fc-option-letter ' + markCls;
+    mark.textContent = extra.marker || (tier === 0 ? '✓' : tier === 1 ? '!' : '✕');
+    mark.title = tier === 0 ? 'Works right now' : tier === 1 ? 'Works after a prep step' : "Doesn't apply here";
+    optDiv.appendChild(mark);
     const body = document.createElement('div');
     body.className = 'fc-option-body';
-    if (lever.applicable === false) {
+    if (tier === 2) {
       body.textContent = lever.reason;
     } else {
       let html = '';
       if (lever.precondition) html += `<div class="fc-warn">${lever.precondition}</div>`;
-      html += `<div class="fc-option-do">${lever.plain}</div>`;
+      html += `<div class="fc-option-do">${extra.reco ? '<span class="fc-reco">Recommended</span> ' : ''}${lever.plain}</div>`;
       if (lever.affects) html += `<div class="fc-option-blast"><strong>Also affects:</strong> ${lever.affects}</div>`;
       if (lever.why)     html += `<details class="fc-why"><summary>Why?</summary><div>${lever.why}</div></details>`;
       body.innerHTML = html;
     }
     optDiv.appendChild(body);
     optsDiv.appendChild(optDiv);
+  };
+
+  // Order a role's options by relevance (works-now → needs-prep → n/a), keeping the
+  // original A–F order within each tier. Mark the first works-now option "Recommended".
+  const orderByRelevance = (opts) => {
+    const idx = new Map(opts.map((o, i) => [o, i]));
+    return opts.slice().sort((a, b) => tierOf(a) - tierOf(b) || idx.get(a) - idx.get(b));
   };
 
   const fieldLabelText = operationName ? `“${escapeHtml(operationName)}”` : `this record`;
@@ -3168,11 +3185,16 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
     advisor.appendChild(intro);
 
     for (const r of rows.filter(r => PERM_RANK[r.effective] < tRank)) {
-      const opts      = computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState);
+      const opts      = orderByRelevance(computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState));
       const roleBlock = document.createElement('div');
       roleBlock.className = 'fc-role-block';
       roleBlock.appendChild(roleHeader(r.role, r.effective));
-      for (const opt of opts) appendLever(roleBlock, opt.letter, opt);
+      let recoGiven = false;
+      for (const opt of opts) {
+        const reco = !recoGiven && tierOf(opt) === 0;
+        if (reco) recoGiven = true;
+        appendLever(roleBlock, opt, { reco });
+      }
       advisor.appendChild(roleBlock);
     }
   } else {
@@ -3188,7 +3210,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       const roleBlock = document.createElement('div');
       roleBlock.className = 'fc-role-block';
       roleBlock.appendChild(roleHeader(r.role, r.effective));
-      appendLever(roleBlock, '↓', { applicable: true, precondition: lever.precondition, plain: lever.plain, affects: lever.affects, why: lever.why });
+      appendLever(roleBlock, { applicable: true, precondition: lever.precondition, plain: lever.plain, affects: lever.affects, why: lever.why }, { marker: '↓' });
       advisor.appendChild(roleBlock);
     }
   }
