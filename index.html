@@ -2778,33 +2778,62 @@ function computeFieldCoverageRows(block, operationName, roles, siteLevel, entity
     seen.set(r.name, r.defaultPermission);
   }
 
+  // Which roles in this set own a matched (non-*) column? If ANY do, evaluate() consumes the
+  // shared * path inside their cascades and a column-less role contributes ONLY its own default
+  // (the * does not lift it). Evaluating a role in isolation would wrongly hand it the * value,
+  // so MAX(rows) wouldn't equal the combined result. We strip that here so each row reflects the
+  // role's ACTUAL contribution to this user — and MAX(rows) === the combined permission.
+  const matchedNonStar = new Set(
+    block.roleColumns.filter(rc => rc.name !== '*' && columnMatches(rc, block.conditions, entityState)).map(rc => rc.name)
+  );
+  const hasColumnHolder = [...seen.keys()].some(n => matchedNonStar.has(n));
+
   const rows = [];
   for (const [roleName, roleDefault] of seen) {
     const trace = evaluate(block, operationName, [{ name: roleName, defaultPermission: roleDefault }], siteLevel, entityState);
+    const inTable            = block.roleColumns.some(rc => rc.name === roleName);
+    const hasDedicatedColumn = inTable;
+    const hasMatchedColumn   = trace.groupA.length > 0;          // Group A: owns a matched column
+    const subst              = trace.substitutions.find(s => s.role === roleName);
+    const resolvedDefault    = subst ? subst.resolved : normCode(roleDefault);
 
-    const hasDedicatedColumn = block.roleColumns.some(rc => rc.name === roleName);
-    const hasMatchedColumn   = trace.groupA.length > 0;
-    const isFilteredOut      = !hasMatchedColumn && trace.unmatchedColumns.some(rc => rc.name === roleName);
+    let effective, via, isFilteredOut = false;
 
-    let via;
-    if (trace.shortCircuit) {
-      via = "Role's default access level";
-    } else {
-      const stopStep = hasMatchedColumn
-        ? trace.groupA[0].steps.find(s => s.stop)
-        : (trace.common ? trace.common.steps.find(s => s.stop) : null);
-      if (!stopStep || !stopStep.cell) {
-        via = isFilteredOut ? 'Column switched off by record properties' : "Role's default access level";
-      } else if (stopStep.cell.row === 'op') {
-        const isStar = trace.starColumn && ('col' + trace.starColumn.columnIndex) === stopStep.cell.col;
-        via = isStar ? 'Shared * column (this field)' : `${roleName}'s value on this field`;
+    if (hasMatchedColumn) {
+      // Owns a matched column — its cascade (with * as its own fallback) is context-independent.
+      effective = trace.final;
+      const stop = trace.groupA[0].steps.find(s => s.stop);
+      if (!stop || !stop.cell) {
+        via = "Role's default access level";
       } else {
-        const isStar = trace.starColumn && ('col' + trace.starColumn.columnIndex) === stopStep.cell.col;
-        via = isStar ? 'Shared * column (Permissions row)' : `${roleName}'s Permissions-row value`;
+        const isStar = trace.starColumn && ('col' + trace.starColumn.columnIndex) === stop.cell.col;
+        via = stop.cell.row === 'op'
+          ? (isStar ? 'Shared * column (this field)' : `${roleName}'s value on this field`)
+          : (isStar ? 'Shared * column (Permissions row)' : `${roleName}'s Permissions-row value`);
+      }
+    } else if (hasColumnHolder) {
+      // Column-less (or all-columns-filtered) role, with a column-holder present: the * path
+      // doesn't reach it. It contributes only its own default (Group B) or nothing (filtered).
+      if (inTable) { effective = 'X'; isFilteredOut = true; via = 'Column switched off by record properties'; }
+      else         { effective = resolvedDefault; via = "Role's default access level"; }
+    } else {
+      // No column-holder in the set: the shared * path DOES apply (exactly as the combined result).
+      effective = trace.final;
+      const commonResult = trace.common ? trace.common.result : 'X';
+      const fromDefault  = PERM_RANK[resolvedDefault] >= PERM_RANK[commonResult];
+      if (inTable && trace.unmatchedColumns.some(rc => rc.name === roleName) && !trace.common) {
+        isFilteredOut = true; via = 'Column switched off by record properties';
+      } else if (fromDefault) {
+        via = "Role's default access level";
+        if (inTable && !trace.groupA.length) isFilteredOut = true; // its own column is filtered; default wins
+      } else {
+        const s = trace.common && trace.common.steps.find(x => x.stop && x.cell);
+        via = (s && s.cell.row === 'op') ? 'Shared * column (this field)' : 'Shared * column (Permissions row)';
+        if (inTable && !trace.groupA.length) isFilteredOut = true;
       }
     }
 
-    rows.push({ role: roleName, roleDefault, effective: trace.final, hasDedicatedColumn, hasMatchedColumn, isFilteredOut, via, trace });
+    rows.push({ role: roleName, roleDefault, effective, hasDedicatedColumn, hasMatchedColumn, isFilteredOut, via, trace });
   }
 
   rows.sort((a, b) => {
@@ -2814,7 +2843,7 @@ function computeFieldCoverageRows(block, operationName, roles, siteLevel, entity
   return rows;
 }
 
-function computeChangeOptions(block, operationName, roleName, roleDefault, targetPerm, siteLevel, entityState) {
+function computeChangeOptions(block, operationName, roleName, roleDefault, targetPerm, siteLevel, entityState, hasColumnHolder) {
   const trace        = evaluate(block, operationName, [{ name: roleName, defaultPermission: roleDefault }], siteLevel, entityState);
   const matchedCol   = trace.matchedColumns.find(rc => rc.name === roleName);
   const hasDedicated = block.roleColumns.some(rc => rc.name === roleName);
@@ -2899,6 +2928,9 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   // D — change the shared (*) column
   if (!trace.starColumn) {
     options.push({ letter: 'D', applicable: false, reason: `There's no shared (*) column in effect for this record's properties.` });
+  } else if (!matchedCol && hasColumnHolder) {
+    // The * is consumed by the role(s) that have their own column here; it does not lift this role.
+    options.push({ letter: 'D', applicable: false, reason: `The shared (*) column is used by the role(s) that have their own column on this record, not by ${esc(roleName)} — changing it won't affect ${esc(roleName)}.` });
   } else {
     const starIdx = trace.starColumn.columnIndex;
     let onRow, dStarStep, techCell;
@@ -2948,7 +2980,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
 // Determine the controlling lever(s) to LOWER a role's effective permission down to the target.
 // Unlike raising (many ways to grant), lowering must neutralise the path that actually produced
 // the high value — and for a role contributing via both its DB default AND the * catch-all, both.
-function fieldLowerLever(block, operationName, row, targetPerm) {
+function fieldLowerLever(block, operationName, row, targetPerm, hasColumnHolder) {
   const esc = escapeHtml;
   const roleName = row.role;
   const t = row.trace;
@@ -3009,7 +3041,11 @@ function fieldLowerLever(block, operationName, row, targetPerm) {
   // Default already wins outright (and the shared column never gets read).
   if (t.shortCircuit) return dbLever;
 
-  // No own column: result is the higher of (default, shared * column). Lower whichever exceed target.
+  // Column-less role with a column-holder present: the * doesn't reach it, so its only
+  // contribution is its own default — that's the lever, regardless of the * value.
+  if (hasColumnHolder) return dbLever;
+
+  // No column-holder: result is the higher of (default, shared * column). Lower whichever exceed target.
   const commonResult = t.common ? t.common.result : 'X';
   const commonStop   = t.common ? t.common.steps.find(s => s.stop && s.cell) : null;
   const defAbove     = PERM_RANK[resolvedDefault] > tRank;
@@ -3128,6 +3164,9 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
 
   const tRank = PERM_RANK[targetPerm];
   const cRank = PERM_RANK[combined.final];
+  // Any role in the set with its own matched column? If so, the shared * is consumed by it and
+  // doesn't lift column-less roles — the advisor must reflect that (no "change *" for those roles).
+  const hasColumnHolder = rows.some(r => r.hasMatchedColumn);
 
   // role header chip row: "<role> currently <X> → target <T>"
   const roleHeader = (roleName, curPerm) => {
@@ -3204,7 +3243,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
     advisor.appendChild(intro);
 
     const belowRows = rows.filter(r => PERM_RANK[r.effective] < tRank);
-    const perRole = belowRows.map(r => ({ r, opts: orderByRelevance(computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState)) }));
+    const perRole = belowRows.map(r => ({ r, opts: orderByRelevance(computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState, hasColumnHolder)) }));
 
     // Pick the single best lever across all roles: prefer works-now over needs-prep, then narrowest scope.
     const narrow = { A: 0, B: 1, F: 2, D: 3, C: 4, E: 5 };
@@ -3252,7 +3291,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
 
     // Group roles that share the same lever (e.g. all riding the system-wide default, or the same
     // shared * cell) into one card, so the same instruction isn't repeated per role.
-    const descs  = aboveRows.map(r => ({ r, d: fieldLowerLever(block, operationName, r, targetPerm) }));
+    const descs  = aboveRows.map(r => ({ r, d: fieldLowerLever(block, operationName, r, targetPerm, hasColumnHolder) }));
     const groups = [];
     const byKey  = new Map();
     for (const x of descs) {
