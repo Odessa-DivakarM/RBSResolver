@@ -460,8 +460,8 @@ code.inline {
 .conditions-panel[open] > summary::before { transform: rotate(90deg); }
 .conditions-body { padding: 0 16px 14px; }
 
-/* ── Mode toggle (Single field / Access matrix) ───────────── */
-.mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; width: fit-content; min-width: 240px; }
+/* ── Mode toggle (Role Matrix / Trace / Field View) ─────── */
+.mode-toggle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; width: fit-content; min-width: 280px; }
 .mode-toggle button { background: white; border: none; padding: 8px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
 .mode-toggle button + button { border-left: 1px solid var(--border); }
 .mode-toggle button.active { background: var(--accent); color: white; }
@@ -507,6 +507,31 @@ button.matrix-export { margin-left: auto; }
 .matrix-link-btn { background: none; border: none; padding: 1px 2px; font: inherit; font-size: 11px; color: var(--muted); cursor: pointer; border-bottom: 1px dotted var(--muted); border-radius: 0; }
 .matrix-link-btn:hover { color: var(--accent); border-bottom-color: var(--accent); }
 .matrix-link-sep { color: var(--border); user-select: none; }
+
+/* ── Field View mode ──────────────────────────────────── */
+.fc-section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+.fc-section h2 { font-size: 13px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+table.fc-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.fc-table th, table.fc-table td { border: 1px solid var(--border); padding: 5px 10px; vertical-align: middle; }
+table.fc-table th { background: #f0f2f5; font-weight: 600; text-align: left; white-space: nowrap; }
+table.fc-table td.fc-perm { text-align: center; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-weight: 700; min-width: 40px; }
+table.fc-table td.fc-role { font-weight: 500; white-space: nowrap; }
+table.fc-table td.fc-via { font-size: 11px; color: var(--muted); font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
+table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var(--muted); }
+.fc-table tr.fc-below-target td.fc-perm { outline: 2px solid var(--warning-border); outline-offset: -2px; }
+.fc-table tr.fc-at-target td.fc-perm { outline: 2px solid #059669; outline-offset: -2px; }
+.fc-advisor { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+.fc-advisor h2 { font-size: 13px; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+.advisor-intro { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
+.fc-role-block { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; background: #fafbfc; }
+.fc-role-block-hdr { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.fc-options { padding: 10px 12px 6px; }
+.fc-option { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; margin-bottom: 10px; align-items: start; }
+.fc-option-letter { font-size: 11px; font-weight: 700; color: var(--accent); padding-top: 1px; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
+.fc-option-body { font-size: 12px; line-height: 1.6; }
+.fc-option-blast { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.fc-option.fc-na { opacity: 0.4; }
+.fc-option.fc-na .fc-option-body { text-decoration: line-through; color: var(--muted); font-style: italic; text-decoration: none; }
 
 </style>
 </head>
@@ -577,6 +602,16 @@ button.matrix-export { margin-left: auto; }
           <option value="">&mdash; entity-level &mdash;</option>
         </select>
       </div>
+      <div class="field" id="targetPermField" style="display:none;">
+        <label>Target permission<span class="tip" tabindex="0" data-tip="The permission you want roles to have. The Change Advisor will appear below the table and suggest what to edit in the spreadsheet to reach it.">?</span></label>
+        <select id="targetPerm">
+          <option value="">— show table only —</option>
+          <option value="F">F — Full</option>
+          <option value="M">M — Modify</option>
+          <option value="R">R — Read</option>
+          <option value="N">N — None</option>
+        </select>
+      </div>
     </div>
     <details class="panel conditions-panel" id="conditionsPanel" style="display:none;">
       <summary>When — record properties</summary>
@@ -588,23 +623,26 @@ button.matrix-export { margin-left: auto; }
     <div class="panel" id="actionPanel" style="display:none;">
       <button class="primary" id="evaluate">Evaluate permission</button>
       <button class="primary" id="generateMatrix" style="display:none;">Generate access matrix</button>
+      <button class="primary" id="generateFieldCoverage" style="display:none;">Analyse field</button>
       <div style="text-align:center; margin-top:10px;"><a href="#" id="runTests" style="font-size:11px; color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--muted);">Run algorithm tests</a></div>
     </div>
   </div>
   <div class="right">
     <!-- Mode toggle: lives above the output — switches the view, not the inputs -->
     <div class="mode-toggle" id="modeToggle" role="tablist" aria-label="Resolver mode">
-      <button type="button" id="modeMatrixBtn" class="active" role="tab" aria-selected="true" title="See effective permissions for every record and field in one view">Access matrix</button>
-      <button type="button" id="modeSingleBtn" role="tab" aria-selected="false" title="Evaluate one record/field at a time and see the full cascade">Single field</button>
+      <button type="button" id="modeMatrixBtn" class="active" role="tab" aria-selected="true" title="See effective permissions for every record and field for a given user's roles">Role Matrix</button>
+      <button type="button" id="modeSingleBtn" role="tab" aria-selected="false" title="Step through exactly why a user can or cannot access a specific field">Trace</button>
+      <button type="button" id="modeFieldBtn" role="tab" aria-selected="false" title="See which roles have access to one field, and get advice on changing permissions">Field View</button>
     </div>
     <div id="output">
       <div class="empty-state">
-        <div class="big">Access matrix</div>
+        <div class="big">Role Matrix</div>
         See all permissions for a user across every record — at once.
         <div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.<br>Load a workbook on the left to begin.</div>
       </div>
     </div>
     <div id="matrixOutput" style="display:none;"></div>
+    <div id="fieldOutput" style="display:none;"></div>
   </div>
 </div>
 <datalist id="rolesList"></datalist>
@@ -1357,54 +1395,78 @@ if (siteSel) siteSel.addEventListener('change', e => { siteLevelDefault = e.targ
 // Mode toggle wiring
 $('modeSingleBtn').addEventListener('click', () => setAppMode('single'));
 $('modeMatrixBtn').addEventListener('click', () => setAppMode('matrix'));
+$('modeFieldBtn').addEventListener('click', () => setAppMode('field'));
 $('generateMatrix').addEventListener('click', () => renderMatrix());
+$('generateFieldCoverage').addEventListener('click', () => runFieldCoverage());
+$('targetPerm').addEventListener('change', () => { if (appMode === 'field' && currentBlock) runFieldCoverage(); });
 
 function modeEmptyState(loaded) {
   if (appMode === 'matrix') {
     return loaded
-      ? `<div class="empty-state"><div class="big">Access matrix</div>Set the user's roles on the left, then click <em>Generate access matrix</em>.<div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.</div></div>`
-      : `<div class="empty-state"><div class="big">Access matrix</div>See all permissions for a user across every record — at once.<div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.<br>Load a workbook on the left to begin.</div></div>`;
+      ? `<div class="empty-state"><div class="big">Role Matrix</div>Set the user's roles on the left, then click <em>Generate access matrix</em>.<div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.</div></div>`
+      : `<div class="empty-state"><div class="big">Role Matrix</div>See all permissions for a user across every record — at once.<div class="empty-state-hint">Best for onboarding a new user, security audits, or getting the full picture of what a user can do.<br>Load a workbook on the left to begin.</div></div>`;
+  } else if (appMode === 'field') {
+    return loaded
+      ? `<div class="empty-state"><div class="big">Field View</div>Pick a record and field on the left, then click <em>Analyse field</em>.<div class="empty-state-hint">Shows every role's access to that field. Set a target permission to see the Change Advisor.</div></div>`
+      : `<div class="empty-state"><div class="big">Field View</div>See which roles can access a specific field — and what to change to reach a target permission.<div class="empty-state-hint">Load a workbook on the left to begin.</div></div>`;
   } else {
     return loaded
-      ? `<div class="empty-state"><div class="big">Single field</div>Pick a record and field on the left, then click <em>Evaluate permission</em>.<div class="empty-state-hint">Best for investigating why a user can or can't access something specific — shows the full decision trail.</div></div>`
-      : `<div class="empty-state"><div class="big">Single field</div>Trace exactly why a user can or can't access a specific record or field.<div class="empty-state-hint">Best for investigating a specific access complaint or debugging a permission issue.<br>Load a workbook on the left to begin.</div></div>`;
+      ? `<div class="empty-state"><div class="big">Trace</div>Pick a record and field on the left, then click <em>Evaluate permission</em>.<div class="empty-state-hint">Best for investigating why a user can or can't access something specific — shows the full decision trail.</div></div>`
+      : `<div class="empty-state"><div class="big">Trace</div>Trace exactly why a user can or can't access a specific record or field.<div class="empty-state-hint">Best for investigating a specific access complaint or debugging a permission issue.<br>Load a workbook on the left to begin.</div></div>`;
   }
 }
 
 function setAppMode(mode) {
   appMode = mode;
   const single = mode === 'single';
+  const matrix = mode === 'matrix';
+  const field  = mode === 'field';
+
+  // Mode toggle button states
   $('modeSingleBtn').classList.toggle('active', single);
-  $('modeMatrixBtn').classList.toggle('active', !single);
+  $('modeMatrixBtn').classList.toggle('active', matrix);
+  $('modeFieldBtn').classList.toggle('active', field);
   $('modeSingleBtn').setAttribute('aria-selected', single ? 'true' : 'false');
-  $('modeMatrixBtn').setAttribute('aria-selected', single ? 'false' : 'true');
-  // Update empty state guidance in whichever container the mode actually shows
+  $('modeMatrixBtn').setAttribute('aria-selected', matrix ? 'true' : 'false');
+  $('modeFieldBtn').setAttribute('aria-selected', field  ? 'true' : 'false');
+
+  // Update empty-state guidance in the active container
   const out = $('output');
   const mx  = $('matrixOutput');
+  const fo  = $('fieldOutput');
   if (single) {
-    // Single field uses #output — update it if still showing guidance
     if (out.querySelector('.empty-state')) out.innerHTML = modeEmptyState(!!parsed);
-  } else if (!parsed) {
-    // Matrix uses #matrixOutput — populate with guidance when no data loaded yet
+  } else if (matrix && !parsed) {
     mx.innerHTML = modeEmptyState(false);
+  } else if (field) {
+    if (!fo.children.length || fo.querySelector('.empty-state')) fo.innerHTML = modeEmptyState(!!parsed);
   }
-  // If parsed, renderMatrix() below will populate #matrixOutput
-  // Hide Step 2 (block/op pick) and Step 4 (conditions) in matrix mode
+
+  // Left-pane panels
   if (parsed) {
-    $('queryPanel').style.display = single ? '' : 'none';
-    if (single) {
-      renderConditions(); // restores Step 4 visibility based on current block
+    $('rolesPanel').style.display  = field ? 'none' : '';
+    $('queryPanel').style.display  = matrix ? 'none' : '';
+    $('targetPermField').style.display = field ? '' : 'none';
+    if (single || field) {
+      renderConditions();
     } else {
       $('conditionsPanel').style.display = 'none';
     }
   }
-  // Swap the action button
-  $('evaluate').style.display = single ? '' : 'none';
-  $('generateMatrix').style.display = single ? 'none' : '';
-  // Swap the right-pane output
-  $('output').style.display = single ? '' : 'none';
-  $('matrixOutput').style.display = single ? 'none' : '';
-  if (!single && parsed) renderMatrix();
+
+  // Action buttons
+  $('evaluate').style.display            = single ? '' : 'none';
+  $('generateMatrix').style.display      = matrix ? '' : 'none';
+  $('generateFieldCoverage').style.display = field  ? '' : 'none';
+
+  // Right-pane output containers
+  $('output').style.display       = single ? '' : 'none';
+  $('matrixOutput').style.display = matrix ? '' : 'none';
+  $('fieldOutput').style.display  = field  ? '' : 'none';
+
+  // Auto-render on mode switch when data is already loaded
+  if (matrix && parsed) renderMatrix();
+  if (field  && parsed && currentBlock) runFieldCoverage();
 }
 
 // ============================================================
@@ -2652,6 +2714,304 @@ function downloadCSV(text, filename) {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ============================================================
+// Field View mode
+// ============================================================
+
+function runFieldCoverage() {
+  if (!currentBlock || !parsed) return;
+  const opName     = $('operation').value || null;
+  const targetPerm = $('targetPerm').value || null;
+  const rows       = computeFieldCoverageRows(currentBlock, opName, parsed.roles, siteLevelDefault, entityState);
+  renderFieldMode(currentBlock, opName, rows, targetPerm);
+}
+
+function computeFieldCoverageRows(block, operationName, allRoles, siteLevel, entityState) {
+  const rows = [];
+  for (const roleName of allRoles) {
+    const trace = evaluate(block, operationName, [{ name: roleName, defaultPermission: 'X' }], siteLevel, entityState);
+
+    const hasDedicatedColumn = block.roleColumns.some(rc => rc.name === roleName);
+    const hasMatchedColumn   = trace.groupA.length > 0;
+    const isFilteredOut      = !hasMatchedColumn && trace.unmatchedColumns.some(rc => rc.name === roleName);
+
+    let via;
+    if (trace.shortCircuit) {
+      via = 'No column → site-level default';
+    } else {
+      const stopStep = hasMatchedColumn
+        ? trace.groupA[0].steps.find(s => s.stop)
+        : (trace.common ? trace.common.steps.find(s => s.stop) : null);
+      if (!stopStep || !stopStep.cell) {
+        via = isFilteredOut ? 'Column filtered by conditions' : 'DB default';
+      } else if (stopStep.cell.row === 'op') {
+        const isStar = trace.starColumn && ('col' + trace.starColumn.columnIndex) === stopStep.cell.col;
+        via = isStar ? 'Op × * cell' : `Op × ${roleName} cell`;
+      } else {
+        const isStar = trace.starColumn && ('col' + trace.starColumn.columnIndex) === stopStep.cell.col;
+        via = isStar ? 'Permissions × * cell' : `Permissions × ${roleName} cell`;
+      }
+    }
+
+    rows.push({ role: roleName, effective: trace.final, hasDedicatedColumn, hasMatchedColumn, isFilteredOut, via, trace });
+  }
+
+  rows.sort((a, b) => {
+    const dr = PERM_RANK[b.effective] - PERM_RANK[a.effective];
+    return dr !== 0 ? dr : a.role.localeCompare(b.role);
+  });
+  return rows;
+}
+
+function computeChangeOptions(block, operationName, roleName, targetPerm, siteLevel, entityState) {
+  const trace        = evaluate(block, operationName, [{ name: roleName, defaultPermission: 'X' }], siteLevel, entityState);
+  const matchedCol   = trace.matchedColumns.find(rc => rc.name === roleName);
+  const hasDedicated = block.roleColumns.some(rc => rc.name === roleName);
+  const opRow        = operationName ? block.operations.find(o => o.name === operationName) : null;
+  const esc          = escapeHtml;
+  const options      = [];
+
+  // A — set operation cell for role's dedicated matched column
+  if (!operationName) {
+    options.push({ letter: 'A', applicable: false, reason: 'No field selected — Option A sets a field-level cell. Select a specific field, or use Option B for the block-level Permissions row.' });
+  } else if (!opRow) {
+    options.push({ letter: 'A', applicable: false, reason: `Field row "${esc(operationName)}" is not in the spreadsheet for block "${esc(block.identifier)}" — the row would need to be added first.` });
+  } else if (!matchedCol) {
+    options.push({ letter: 'A', applicable: false, reason: `Role "${esc(roleName)}" has no matched dedicated column in this block (column absent or filtered by entity conditions).` });
+  } else {
+    const cur = opRow.values[matchedCol.columnIndex] || 'X';
+    options.push({
+      letter: 'A', applicable: true,
+      action: `Set the <strong>${esc(operationName)} × ${esc(roleName)}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`,
+      blast:  `Narrowest change: affects only this field ("${esc(operationName)}") for this role ("${esc(roleName)}") in this block ("${esc(block.identifier)}").`
+    });
+  }
+
+  // B — set Permissions row cell for role's dedicated matched column
+  if (!matchedCol) {
+    options.push({ letter: 'B', applicable: false, reason: `Role "${esc(roleName)}" has no matched dedicated column — the Permissions row cell for this role would have no effect.` });
+  } else {
+    const cur = (block.permissions || [])[matchedCol.columnIndex] || 'X';
+    options.push({
+      letter: 'B', applicable: true,
+      action: `Set the <strong>Permissions × ${esc(roleName)}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`,
+      blast:  `Affects all fields in block "${esc(block.identifier)}" for role "${esc(roleName)}" that don't have a more-specific field-level entry (field cells at steps 1–2 take precedence).`
+    });
+  }
+
+  // C — change role DB default
+  const subst = trace.substitutions.find(s => s.role === roleName);
+  options.push({
+    letter: 'C', applicable: true,
+    action: `Set <strong>${esc(roleName)}.DefaultPermission</strong> in the Roles DB to <strong>${targetPerm}</strong>${subst ? ` (currently stored as <em>${subst.stored}</em>, substituted to ${subst.resolved} by the site-level default)` : ''}.`,
+    blast:  `Wide blast radius: affects all blocks in all sheets where this role either has no column (Group B) or falls through all four sheet steps to the DB default.`
+  });
+
+  // D — modify * (catch-all) column cell
+  if (!trace.starColumn) {
+    options.push({ letter: 'D', applicable: false, reason: 'No matching * (catch-all) column for the current entity conditions.' });
+  } else {
+    const starIdx = trace.starColumn.columnIndex;
+    let starAdvice;
+    const gA = trace.groupA[0];
+    if (gA) {
+      const stopStep = gA.steps.find(s => s.stop);
+      if (stopStep && stopStep.n === 2 && opRow) {
+        const cur = opRow.values[starIdx] || 'X';
+        starAdvice = `Set the <strong>${esc(operationName)} × *</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
+      } else if (stopStep && stopStep.n === 4) {
+        const cur = (block.permissions || [])[starIdx] || 'X';
+        starAdvice = `Set the <strong>Permissions × *</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
+      } else {
+        const label = operationName ? `${esc(operationName)} × *` : 'Permissions × *';
+        starAdvice = `The * column (col${starIdx}) exists but the cascade stopped before reaching it. To intercept via *: set the <strong>${label}</strong> cell to <strong>${targetPerm}</strong>.`;
+      }
+    } else if (trace.common) {
+      const stopStep = trace.common.steps.find(s => s.stop && s.cell);
+      const isOpRow  = stopStep && stopStep.cell.row === 'op';
+      const cur      = isOpRow ? (opRow ? opRow.values[starIdx] || 'X' : 'X') : (block.permissions || [])[starIdx] || 'X';
+      const cellLabel = isOpRow ? `${esc(operationName)} × *` : 'Permissions × *';
+      starAdvice = `Set the <strong>${cellLabel}</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
+    } else {
+      const label = operationName ? `${esc(operationName)} × *` : 'Permissions × *';
+      starAdvice = `Set the <strong>${label}</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong>.`;
+    }
+    options.push({
+      letter: 'D', applicable: true,
+      action: starAdvice,
+      blast:  `Affects all roles that resolve via this * column (any role without a more-specific dedicated column). Not role-specific.`
+    });
+  }
+
+  // E — condition mismatch: role's column exists but is filtered out
+  const filteredCols = trace.unmatchedColumns.filter(rc => rc.name === roleName);
+  if (filteredCols.length === 0) {
+    options.push({ letter: 'E', applicable: false, reason: `No columns for "${esc(roleName)}" were excluded by entity conditions.` });
+  } else {
+    const cols = filteredCols.map(rc => `col${rc.columnIndex}`).join(', ');
+    options.push({
+      letter: 'E', applicable: true,
+      action: `${filteredCols.length} column(s) for "${esc(roleName)}" (${cols}) are excluded by the current entity conditions. Either adjust the conditions (left pane) to match those columns, or set the condition cells in those columns to <strong>X</strong> (don't care) so they always apply.`,
+      blast:  `Setting a condition cell to X makes that column active for all records regardless of entity state — affects every role that column covers.`
+    });
+  }
+
+  // F — add a dedicated column for this role (role has no column at all)
+  if (hasDedicated) {
+    options.push({ letter: 'F', applicable: false, reason: `Role "${esc(roleName)}" already has a dedicated column in block "${esc(block.identifier)}".` });
+  } else {
+    const cellTarget = operationName ? `<strong>${esc(operationName)}</strong> row` : '<strong>Permissions</strong> row';
+    options.push({
+      letter: 'F', applicable: true,
+      action: `Add a new column for <strong>${esc(roleName)}</strong> in block "${esc(block.identifier)}" and set the ${cellTarget} cell to <strong>${targetPerm}</strong>. This gives the role its own configuration, independent of the * catch-all.`,
+      blast:  `Most targeted fix when no dedicated column exists: affects only role "${esc(roleName)}" in this block.`
+    });
+  }
+
+  return options;
+}
+
+function renderFieldMode(block, operationName, rows, targetPerm) {
+  const host = $('fieldOutput');
+  host.innerHTML = '';
+
+  // ── Section 1: Role Access Table ─────────────────────────
+  const section = document.createElement('div');
+  section.className = 'fc-section';
+
+  const heading = document.createElement('h2');
+  heading.textContent = operationName
+    ? `Who can access "${operationName}" on ${block.identifier}?`
+    : `Who can access ${block.identifier} (entity level)?`;
+  section.appendChild(heading);
+
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'scroll-x';
+
+  const tbl = document.createElement('table');
+  tbl.className = 'fc-table';
+
+  const thead = tbl.createTHead();
+  const htr   = thead.insertRow();
+  ['Role', 'Permission', 'Dedicated column?', 'Resolved via'].forEach(label => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    htr.appendChild(th);
+  });
+
+  const tbody = tbl.createTBody();
+  for (const r of rows) {
+    const tr = tbody.insertRow();
+    if (targetPerm && PERM_RANK[r.effective] < PERM_RANK[targetPerm]) tr.classList.add('fc-below-target');
+    else if (targetPerm) tr.classList.add('fc-at-target');
+
+    const tdRole = tr.insertCell();
+    tdRole.className = 'fc-role';
+    tdRole.textContent = r.role;
+
+    const tdPerm = tr.insertCell();
+    tdPerm.className = `fc-perm cell-${r.effective}`;
+    tdPerm.textContent = r.effective;
+    tdPerm.title = PERM_NAME[r.effective];
+
+    const tdDed = tr.insertCell();
+    tdDed.className = 'fc-dedicated';
+    tdDed.textContent = r.isFilteredOut ? 'Yes (filtered)' : r.hasDedicatedColumn ? 'Yes' : 'No';
+
+    const tdVia = tr.insertCell();
+    tdVia.className = 'fc-via';
+    tdVia.textContent = r.via;
+  }
+
+  scrollWrap.appendChild(tbl);
+  section.appendChild(scrollWrap);
+
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  legend.style.marginTop = '10px';
+  legend.innerHTML = ['F','M','R','N','X'].map(p =>
+    `<span><span class="swatch cell-${p}"></span>${p} — ${PERM_NAME[p]}</span>`
+  ).join('');
+  section.appendChild(legend);
+  host.appendChild(section);
+
+  // ── Section 2: Change Advisor ────────────────────────────
+  if (!targetPerm) return;
+
+  const belowRows = rows.filter(r => PERM_RANK[r.effective] < PERM_RANK[targetPerm]);
+  const advisor   = document.createElement('div');
+  advisor.className = 'fc-advisor';
+
+  const advH2 = document.createElement('h2');
+  advH2.textContent = 'Change Advisor';
+  advisor.appendChild(advH2);
+
+  if (belowRows.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'advisor-intro';
+    p.style.color = '#059669';
+    p.innerHTML = `All roles already have <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong> or higher. No changes needed.`;
+    advisor.appendChild(p);
+    host.appendChild(advisor);
+    return;
+  }
+
+  const intro = document.createElement('p');
+  intro.className = 'advisor-intro';
+  intro.innerHTML = `${belowRows.length} role(s) are below target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. Inapplicable options are shown greyed out.`;
+  advisor.appendChild(intro);
+
+  for (const r of belowRows) {
+    const opts      = computeChangeOptions(block, operationName, r.role, targetPerm, siteLevelDefault, entityState);
+    const roleBlock = document.createElement('div');
+    roleBlock.className = 'fc-role-block';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'fc-role-block-hdr';
+    hdr.innerHTML =
+      `<span>${escapeHtml(r.role)}</span>` +
+      `<span style="color:var(--muted);font-weight:400;">currently</span>` +
+      `<span class="perm-chip cell-${r.effective}">${r.effective} — ${PERM_NAME[r.effective]}</span>` +
+      `<span style="color:var(--muted);font-weight:400;">→ target</span>` +
+      `<span class="perm-chip cell-${targetPerm}">${targetPerm} — ${PERM_NAME[targetPerm]}</span>`;
+    roleBlock.appendChild(hdr);
+
+    const optsDiv = document.createElement('div');
+    optsDiv.className = 'fc-options';
+
+    for (const opt of opts) {
+      const optDiv = document.createElement('div');
+      optDiv.className = 'fc-option' + (opt.applicable ? '' : ' fc-na');
+
+      const letter = document.createElement('div');
+      letter.className = 'fc-option-letter';
+      letter.textContent = opt.letter;
+      optDiv.appendChild(letter);
+
+      const body = document.createElement('div');
+      body.className = 'fc-option-body';
+      if (opt.applicable) {
+        body.innerHTML = opt.action;
+        if (opt.blast) {
+          const blast = document.createElement('div');
+          blast.className = 'fc-option-blast';
+          blast.innerHTML = `<strong>Scope:</strong> ${opt.blast}`;
+          body.appendChild(blast);
+        }
+      } else {
+        body.textContent = opt.reason;
+      }
+      optDiv.appendChild(body);
+      optsDiv.appendChild(optDiv);
+    }
+
+    roleBlock.appendChild(optsDiv);
+    advisor.appendChild(roleBlock);
+  }
+
+  host.appendChild(advisor);
 }
 </script>
 </body>
