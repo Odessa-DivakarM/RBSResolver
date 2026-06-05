@@ -1542,9 +1542,9 @@ function buildEasyVerdict(t) {
   if (t.groupA.length === 0) {
     const catchAllResult = t.roleBasedPerm || 'X';
     if (t.groupB.length > 0 && PERM_RANK[t.unconfiguredPerm] > PERM_RANK[catchAllResult]) {
-      return `The catch-all rule gave <strong>${PERM_NAME[catchAllResult]}</strong>, but the user also has ${t.groupB.length} role(s) not configured in this block — their default access raised the final result to <strong>${fn}</strong>.`;
+      return `The shared <strong>*</strong> rule gave <strong>${PERM_NAME[catchAllResult]}</strong>, but the user also has ${t.groupB.length} role(s) not configured in this block — their default access raised the final result to <strong>${fn}</strong>.`;
     }
-    return `No specific rules were found for the user's roles in this record type. The system used the catch-all rule, which gives <strong>${fn}</strong>.`;
+    return `No specific rules were found for the user's roles in this record type. The system used the shared <strong>*</strong> rule (the default for any role without its own), which gives <strong>${fn}</strong>.`;
   }
   const roles = t.groupA.map(r => `<em>${escapeHtml(r.role)}</em>`).join(', ');
   if (t.groupB.length === 0)
@@ -1568,10 +1568,10 @@ function stepSentence(stepN, roleName, opName, value, stopped) {
     : ` &rarr; X (not set). No rule here, keep looking.`;
   const prefix = `<span style="font-size:11px; font-weight:600; color:var(--muted); margin-right:4px;">Step ${stepN} of 5 &mdash;</span>`;
   switch (stepN) {
-    case 1: return `${prefix}Checked the rule for ${role} on ${op}${verdict}`;
-    case 2: return `${prefix}Checked the catch-all rule for ${op}${verdict}`;
-    case 3: return `${prefix}Checked the general record-level rule for ${role}${verdict}`;
-    case 4: return `${prefix}Checked the catch-all record-level rule${verdict}`;
+    case 1: return `${prefix}Checked ${role}'s own value for ${op}${verdict}`;
+    case 2: return `${prefix}Checked the shared <strong>*</strong> value for ${op} (used by any role without its own)${verdict}`;
+    case 3: return `${prefix}Checked ${role}'s value for the whole record (the Permissions row)${verdict}`;
+    case 4: return `${prefix}Checked the shared <strong>*</strong> value for the whole record${verdict}`;
     case 5: return `${prefix}Used ${role}'s default access level from the database${verdict}`;
     default: return `${prefix}${verdict}`;
   }
@@ -1587,7 +1587,7 @@ function appendCommonSteps(container, t) {
   if (!t.common) return;
   const steps = t.common.steps || [];
   if (steps.length === 0) {
-    addStoryBlock(container, `No catch-all rule matched for this record type. Result: ${permChip(t.common.result)}.`);
+    addStoryBlock(container, `No shared <strong>*</strong> rule matched for this record type. Result: ${permChip(t.common.result)}.`);
     return;
   }
   const op = t.operationName;
@@ -1597,14 +1597,14 @@ function appendCommonSteps(container, t) {
     // First step with an operation = operation × * check; otherwise = permissions × * check
     if (i === 0 && op) {
       text = s.stop
-        ? `The catch-all rule for <strong>${escapeHtml(op)}</strong> gives ${chip}. That's the answer.`
-        : `The catch-all rule for <strong>${escapeHtml(op)}</strong> was not set (X). Checking the record-level default next.`;
+        ? `The shared <strong>*</strong> rule for <strong>${escapeHtml(op)}</strong> gives ${chip}. That's the answer.`
+        : `The shared <strong>*</strong> rule for <strong>${escapeHtml(op)}</strong> was not set (X). Checking the record-level default next.`;
     } else if (s.desc && s.desc.startsWith('No *')) {
-      text = `No catch-all column matched the current record properties. Result: ${chip}.`;
+      text = `No shared <strong>*</strong> column matched the current record properties. Result: ${chip}.`;
     } else {
       text = s.stop
-        ? `The record-level catch-all rule gives ${chip}. That's the answer.`
-        : `No catch-all rule matched. Result: ${chip}.`;
+        ? `The shared <strong>*</strong> rule for the whole record gives ${chip}. That's the answer.`
+        : `No shared <strong>*</strong> rule matched. Result: ${chip}.`;
     }
     addStoryBlock(container, text, s.stop ? 'is-stop' : '');
   });
@@ -1625,7 +1625,7 @@ function buildNarrativeTrace(t) {
   }
 
   if (t.groupA.length === 0) {
-    addStoryBlock(wrap, `None of the user's roles are specifically listed in this record type's rules. The system falls back to the catch-all (*) rule.`);
+    addStoryBlock(wrap, `None of the user's roles are specifically listed in this record type's rules. The system falls back to the shared <strong>*</strong> rule (the default for any role without its own).`);
     appendCommonSteps(wrap, t);
     if (t.groupB.length) {
       const names = t.groupB.map(r => escapeHtml(r.role)).join(', ');
