@@ -1094,7 +1094,8 @@ const userRoles = [];
 let entityState = {}; // { conditionName: 'T' | 'F' | undefined }
 
 // Access-matrix state
-let appMode = 'matrix'; // 'single' | 'matrix'
+let appMode = 'matrix'; // 'single' | 'matrix' | 'field'
+let rolesUserModified = false; // true once the user adds/removes/edits a role — gates Field View auto-fill
 let matrixSheet = 'Entities';
 const matrixConditionStates = new Map(); // key: `${sheet}:${blockIdx}` -> { [condName]: 'T' | 'F' }
 let matrixFilter = { text: '', levels: new Set(['F', 'M', 'R', 'N', 'X']) };
@@ -1241,6 +1242,7 @@ function onLoaded() {
   $('actionPanel').style.display = '';
   refreshRolesList();
   renderTabs();
+  rolesUserModified = false; // fresh workbook — re-enable Field View auto-fill
   if (userRoles.length === 0) addRoleRow();
   renderRoles();
   selectSheet('Entities');
@@ -1347,10 +1349,13 @@ function renderConditions() {
   }
 }
 
-$('addRole').addEventListener('click', () => { addRoleRow(); renderRoles(); });
+$('addRole').addEventListener('click', () => { addRoleRow(); renderRoles(); rolesChanged(); });
 function addRoleRow() {
   userRoles.push({ name: (parsed && parsed.roles && parsed.roles[0]) || '', defaultPermission: 'N' });
 }
+// Field View output depends on userRoles — refresh it live when roles change.
+// Touches only #fieldOutput (not the roles panel), so input focus is preserved while typing.
+function rolesChanged() { rolesUserModified = true; if (appMode === 'field' && currentBlock) runFieldCoverage(); }
 function renderRoles() {
   const list = $('roleList');
   list.innerHTML = '';
@@ -1362,7 +1367,7 @@ function renderRoles() {
     nameInput.value = r.name;
     nameInput.setAttribute('list', 'rolesList');
     nameInput.placeholder = 'role name';
-    nameInput.addEventListener('input', e => r.name = e.target.value);
+    nameInput.addEventListener('input', e => { r.name = e.target.value; rolesChanged(); });
     row.appendChild(nameInput);
     const permSel = document.createElement('select');
     for (const p of ['F', 'M', 'R', 'N', 'X']) {
@@ -1371,11 +1376,11 @@ function renderRoles() {
       if (r.defaultPermission === p) opt.selected = true;
       permSel.appendChild(opt);
     }
-    permSel.addEventListener('change', e => r.defaultPermission = e.target.value);
+    permSel.addEventListener('change', e => { r.defaultPermission = e.target.value; rolesChanged(); });
     row.appendChild(permSel);
     const rm = document.createElement('button');
     rm.className = 'remove'; rm.textContent = '×'; rm.title = 'Remove role';
-    rm.addEventListener('click', () => { userRoles.splice(i, 1); renderRoles(); });
+    rm.addEventListener('click', () => { userRoles.splice(i, 1); renderRoles(); rolesChanged(); });
     row.appendChild(rm);
     list.appendChild(row);
   });
@@ -1442,15 +1447,23 @@ function setAppMode(mode) {
     if (!fo.children.length || fo.querySelector('.empty-state')) fo.innerHTML = modeEmptyState(!!parsed);
   }
 
-  // Left-pane panels
+  // Left-pane panels — roles panel is now shared by all three modes
   if (parsed) {
-    $('rolesPanel').style.display  = field ? 'none' : '';
+    $('rolesPanel').style.display  = '';
     $('queryPanel').style.display  = matrix ? 'none' : '';
     $('targetPermField').style.display = field ? '' : 'none';
     if (single || field) {
       renderConditions();
     } else {
       $('conditionsPanel').style.display = 'none';
+    }
+    // Entering Field View before the user has deliberately configured roles: auto-fill all
+    // workbook roles (default X = use GP), editable, so the table is complete by default.
+    // Once the user has touched roles (in any mode), keep their config untouched.
+    if (field && !rolesUserModified && parsed.roles) {
+      userRoles.length = 0;
+      parsed.roles.forEach(n => userRoles.push({ name: n, defaultPermission: 'X' }));
+      renderRoles();
     }
   }
 
@@ -2724,14 +2737,24 @@ function runFieldCoverage() {
   if (!currentBlock || !parsed) return;
   const opName     = $('operation').value || null;
   const targetPerm = $('targetPerm').value || null;
-  const rows       = computeFieldCoverageRows(currentBlock, opName, parsed.roles, siteLevelDefault, entityState);
-  renderFieldMode(currentBlock, opName, rows, targetPerm);
+  // Drive everything off the real, user-supplied roles (name + DB default) — no guesses.
+  const rows       = computeFieldCoverageRows(currentBlock, opName, userRoles, siteLevelDefault, entityState);
+  // The actual permission the system computes for this multi-role user (MAX across roles).
+  const combined   = userRoles.length ? evaluate(currentBlock, opName, userRoles, siteLevelDefault, entityState) : null;
+  renderFieldMode(currentBlock, opName, rows, targetPerm, combined);
 }
 
-function computeFieldCoverageRows(block, operationName, allRoles, siteLevel, entityState) {
+function computeFieldCoverageRows(block, operationName, roles, siteLevel, entityState) {
+  // Dedupe by name (last wins) so duplicate role rows don't appear in the table.
+  const seen = new Map();
+  for (const r of roles) {
+    if (!r.name) continue;
+    seen.set(r.name, r.defaultPermission);
+  }
+
   const rows = [];
-  for (const roleName of allRoles) {
-    const trace = evaluate(block, operationName, [{ name: roleName, defaultPermission: 'X' }], siteLevel, entityState);
+  for (const [roleName, roleDefault] of seen) {
+    const trace = evaluate(block, operationName, [{ name: roleName, defaultPermission: roleDefault }], siteLevel, entityState);
 
     const hasDedicatedColumn = block.roleColumns.some(rc => rc.name === roleName);
     const hasMatchedColumn   = trace.groupA.length > 0;
@@ -2739,7 +2762,7 @@ function computeFieldCoverageRows(block, operationName, allRoles, siteLevel, ent
 
     let via;
     if (trace.shortCircuit) {
-      via = 'No column → site-level default';
+      via = 'No column → DB default';
     } else {
       const stopStep = hasMatchedColumn
         ? trace.groupA[0].steps.find(s => s.stop)
@@ -2755,7 +2778,7 @@ function computeFieldCoverageRows(block, operationName, allRoles, siteLevel, ent
       }
     }
 
-    rows.push({ role: roleName, effective: trace.final, hasDedicatedColumn, hasMatchedColumn, isFilteredOut, via, trace });
+    rows.push({ role: roleName, roleDefault, effective: trace.final, hasDedicatedColumn, hasMatchedColumn, isFilteredOut, via, trace });
   }
 
   rows.sort((a, b) => {
@@ -2765,8 +2788,8 @@ function computeFieldCoverageRows(block, operationName, allRoles, siteLevel, ent
   return rows;
 }
 
-function computeChangeOptions(block, operationName, roleName, targetPerm, siteLevel, entityState) {
-  const trace        = evaluate(block, operationName, [{ name: roleName, defaultPermission: 'X' }], siteLevel, entityState);
+function computeChangeOptions(block, operationName, roleName, roleDefault, targetPerm, siteLevel, entityState) {
+  const trace        = evaluate(block, operationName, [{ name: roleName, defaultPermission: roleDefault }], siteLevel, entityState);
   const matchedCol   = trace.matchedColumns.find(rc => rc.name === roleName);
   const hasDedicated = block.roleColumns.some(rc => rc.name === roleName);
   const opRow        = operationName ? block.operations.find(o => o.name === operationName) : null;
@@ -2801,11 +2824,14 @@ function computeChangeOptions(block, operationName, roleName, targetPerm, siteLe
     });
   }
 
-  // C — change role DB default
-  const subst = trace.substitutions.find(s => s.role === roleName);
+  // C — change role DB default (uses the role's ACTUAL stored default, not a guess)
+  const subst   = trace.substitutions.find(s => s.role === roleName);
+  const curNote = subst
+    ? ` (currently <em>X</em> — not set, so the system substitutes the GP fallback ${subst.resolved})`
+    : ` (currently <em>${normCode(roleDefault)}</em>)`;
   options.push({
     letter: 'C', applicable: true,
-    action: `Set <strong>${esc(roleName)}.DefaultPermission</strong> in the Roles DB to <strong>${targetPerm}</strong>${subst ? ` (currently stored as <em>${subst.stored}</em>, substituted to ${subst.resolved} by the site-level default)` : ''}.`,
+    action: `Set <strong>${esc(roleName)}.DefaultPermission</strong> in the Roles DB to <strong>${targetPerm}</strong>${curNote}.`,
     blast:  `Wide blast radius: affects all blocks in all sheets where this role either has no column (Group B) or falls through all four sheet steps to the DB default.`
   });
 
@@ -2873,9 +2899,31 @@ function computeChangeOptions(block, operationName, roleName, targetPerm, siteLe
   return options;
 }
 
-function renderFieldMode(block, operationName, rows, targetPerm) {
+function renderFieldMode(block, operationName, rows, targetPerm, combined) {
   const host = $('fieldOutput');
   host.innerHTML = '';
+
+  // No roles configured → nothing real to compute. Prompt the user.
+  if (!rows.length) {
+    host.innerHTML = `<div class="empty-state"><div class="big">Add a role to begin</div>Field View evaluates each of the user's roles against this field. Add at least one role on the left.<div class="empty-state-hint">Each role uses its actual DB default — set it per role so the results match what the system computes.</div></div>`;
+    return;
+  }
+
+  const fieldLabel = operationName ? `"${escapeHtml(operationName)}"` : `${escapeHtml(block.identifier)} (entity level)`;
+
+  // ── Combined result: the actual permission this multi-role user gets (MAX across roles) ──
+  if (combined) {
+    const summary = document.createElement('div');
+    summary.className = 'fc-section';
+    summary.innerHTML =
+      `<h2>This user's effective permission</h2>` +
+      `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">` +
+      `<span>For ${fieldLabel}:</span>` +
+      `<span class="perm-chip cell-${combined.final}">${combined.final} — ${PERM_NAME[combined.final]}</span>` +
+      `<span style="color:var(--muted);">= MAX across ${rows.length} role(s)</span>` +
+      `</div>`;
+    host.appendChild(summary);
+  }
 
   // ── Section 1: Role Access Table ─────────────────────────
   const section = document.createElement('div');
@@ -2940,31 +2988,37 @@ function renderFieldMode(block, operationName, rows, targetPerm) {
   // ── Section 2: Change Advisor ────────────────────────────
   if (!targetPerm) return;
 
-  const belowRows = rows.filter(r => PERM_RANK[r.effective] < PERM_RANK[targetPerm]);
-  const advisor   = document.createElement('div');
+  const advisor = document.createElement('div');
   advisor.className = 'fc-advisor';
 
   const advH2 = document.createElement('h2');
   advH2.textContent = 'Change Advisor';
   advisor.appendChild(advH2);
 
-  if (belowRows.length === 0) {
+  // The user is already satisfied when their COMBINED (MAX) permission meets the target —
+  // even if individual roles fall short. This is the actual system verdict.
+  const satisfied = combined && PERM_RANK[combined.final] >= PERM_RANK[targetPerm];
+  if (satisfied) {
+    const granting = rows.filter(r => PERM_RANK[r.effective] >= PERM_RANK[targetPerm]).map(r => r.role);
+    const via = granting.length ? ` (granted by ${granting.map(escapeHtml).join(', ')})` : '';
     const p = document.createElement('p');
     p.className = 'advisor-intro';
     p.style.color = '#059669';
-    p.innerHTML = `All roles already have <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong> or higher. No changes needed.`;
+    p.innerHTML = `This user already has <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>, which meets the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>${via}. No change needed.`;
     advisor.appendChild(p);
     host.appendChild(advisor);
     return;
   }
 
+  // Combined is below target ⇒ every role is individually below target. Advise on each.
+  const belowRows = rows.filter(r => PERM_RANK[r.effective] < PERM_RANK[targetPerm]);
   const intro = document.createElement('p');
   intro.className = 'advisor-intro';
-  intro.innerHTML = `${belowRows.length} role(s) are below target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. Inapplicable options are shown greyed out.`;
+  intro.innerHTML = `This user's combined permission is <strong>${combined ? combined.final + ' — ' + PERM_NAME[combined.final] : '—'}</strong>, below target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. Raising any role below raises the user. Inapplicable options are greyed out.`;
   advisor.appendChild(intro);
 
   for (const r of belowRows) {
-    const opts      = computeChangeOptions(block, operationName, r.role, targetPerm, siteLevelDefault, entityState);
+    const opts      = computeChangeOptions(block, operationName, r.role, r.roleDefault, targetPerm, siteLevelDefault, entityState);
     const roleBlock = document.createElement('div');
     roleBlock.className = 'fc-role-block';
 
