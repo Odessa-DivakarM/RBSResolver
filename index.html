@@ -3264,23 +3264,23 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       advisor.appendChild(headline);
     }
 
-    // "Other ways" — full per-role breakdown for anyone who wants the alternatives.
+    // "Other ways" — the ALTERNATIVES only (the recommended lever is already shown above, so it's
+    // excluded here to avoid duplication). Role blocks that have nothing left are skipped.
     const more = document.createElement('details');
     more.className = 'fc-more';
-    more.innerHTML = `<summary>Other ways${belowRows.length > 1 ? ` (all ${belowRows.length} roles)` : ''}</summary>`;
+    more.appendChild(document.createElement('summary')).textContent = 'Other ways';
+    let anyAlt = false;
     for (const { r, opts } of perRole) {
+      const alts = opts.filter(opt => !(best && r === best.r && opt === best.opt));
+      if (!alts.length) continue;
       const roleBlock = document.createElement('div');
       roleBlock.className = 'fc-role-block';
       roleBlock.appendChild(roleHeader(r.role, r.effective));
-      let recoGiven = false;
-      for (const opt of opts) {
-        const reco = !recoGiven && best && r === best.r && opt === best.opt;
-        if (reco) recoGiven = true;
-        appendLever(roleBlock, opt, { reco });
-      }
+      for (const opt of alts) appendLever(roleBlock, opt, {});
       more.appendChild(roleBlock);
+      anyAlt = true;
     }
-    advisor.appendChild(more);
+    if (anyAlt) advisor.appendChild(more);
   } else {
     // ── LOWER ── combined above target; because access can't be taken away, EVERY role above target must come down.
     const aboveRows = rows.filter(r => PERM_RANK[r.effective] > tRank);
