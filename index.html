@@ -2801,6 +2801,31 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   const esc          = escapeHtml;
   const options      = [];
 
+  // Cascade precedence: a lever at step K only takes effect if no earlier cell (step < K) is
+  // non-X — otherwise the cascade stops there first and the later change does nothing. Compute
+  // the cells that currently block each lever so the advice is honest (the user spotted that
+  // changing the DB default has no effect while Permissions × role is still set).
+  const roleColIdx = matchedCol ? matchedCol.columnIndex : null;
+  const starColIdx = trace.starColumn ? trace.starColumn.columnIndex : null;
+  const perms      = block.permissions || [];
+  const blockersBefore = (K) => {
+    if (roleColIdx == null) return [];
+    const out = [];
+    const add = (n, label, val) => { if (n < K && val && normCode(val) !== 'X') out.push(`${label} = ${normCode(val)}`); };
+    if (opRow) {
+      add(1, `${esc(operationName)} × ${esc(roleName)}`, opRow.values[roleColIdx]);
+      if (starColIdx != null) add(2, `${esc(operationName)} × *`, opRow.values[starColIdx]);
+    }
+    add(3, `Permissions × ${esc(roleName)}`, perms[roleColIdx]);
+    if (starColIdx != null) add(4, `Permissions × *`, perms[starColIdx]);
+    return out;
+  };
+  const preNote = (K) => {
+    const b = blockersBefore(K);
+    if (!b.length) return '';
+    return `<strong>⚠ Has no effect on its own:</strong> the cascade stops earlier at ${b.join(', ')} — set ${b.length > 1 ? 'those cells' : 'that cell'} to <em>X</em> first, then apply this. `;
+  };
+
   // A — set operation cell for role's dedicated matched column
   if (!operationName) {
     options.push({ letter: 'A', applicable: false, reason: 'No field selected — Option A sets a field-level cell. Select a specific field, or use Option B for the block-level Permissions row.' });
@@ -2824,7 +2849,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
     const cur = (block.permissions || [])[matchedCol.columnIndex] || 'X';
     options.push({
       letter: 'B', applicable: true,
-      action: `Set the <strong>Permissions × ${esc(roleName)}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`,
+      action: `${preNote(3)}Set the <strong>Permissions × ${esc(roleName)}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`,
       blast:  `Affects all fields in block "${esc(block.identifier)}" for role "${esc(roleName)}" that don't have a more-specific field-level entry (field cells at steps 1–2 take precedence).`
     });
   }
@@ -2836,7 +2861,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
     : ` (currently <em>${normCode(roleDefault)}</em>)`;
   options.push({
     letter: 'C', applicable: true,
-    action: `Set <strong>${esc(roleName)}.DefaultPermission</strong> in the Roles DB to <strong>${targetPerm}</strong>${curNote}.`,
+    action: `${preNote(5)}Set <strong>${esc(roleName)}.DefaultPermission</strong> in the Roles DB to <strong>${targetPerm}</strong>${curNote}.`,
     blast:  `Wide blast radius: affects all blocks in all sheets where this role either has no column (Group B) or falls through all four sheet steps to the DB default.`
   });
 
@@ -2845,33 +2870,38 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
     options.push({ letter: 'D', applicable: false, reason: 'No matching * (catch-all) column for the current entity conditions.' });
   } else {
     const starIdx = trace.starColumn.columnIndex;
-    let starAdvice;
+    let starAdvice, dStarStep;
     const gA = trace.groupA[0];
     if (gA) {
       const stopStep = gA.steps.find(s => s.stop);
       if (stopStep && stopStep.n === 2 && opRow) {
         const cur = opRow.values[starIdx] || 'X';
+        dStarStep = 2;
         starAdvice = `Set the <strong>${esc(operationName)} × *</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
       } else if (stopStep && stopStep.n === 4) {
         const cur = (block.permissions || [])[starIdx] || 'X';
+        dStarStep = 4;
         starAdvice = `Set the <strong>Permissions × *</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
       } else {
+        dStarStep = opRow ? 2 : 4;
         const label = operationName ? `${esc(operationName)} × *` : 'Permissions × *';
-        starAdvice = `The * column (col${starIdx}) exists but the cascade stopped before reaching it. To intercept via *: set the <strong>${label}</strong> cell to <strong>${targetPerm}</strong>.`;
+        starAdvice = `To intercept via the * column (col${starIdx}): set the <strong>${label}</strong> cell to <strong>${targetPerm}</strong>.`;
       }
     } else if (trace.common) {
       const stopStep = trace.common.steps.find(s => s.stop && s.cell);
       const isOpRow  = stopStep && stopStep.cell.row === 'op';
       const cur      = isOpRow ? (opRow ? opRow.values[starIdx] || 'X' : 'X') : (block.permissions || [])[starIdx] || 'X';
       const cellLabel = isOpRow ? `${esc(operationName)} × *` : 'Permissions × *';
+      dStarStep = isOpRow ? 2 : 4;
       starAdvice = `Set the <strong>${cellLabel}</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
     } else {
+      dStarStep = opRow ? 2 : 4;
       const label = operationName ? `${esc(operationName)} × *` : 'Permissions × *';
       starAdvice = `Set the <strong>${label}</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong>.`;
     }
     options.push({
       letter: 'D', applicable: true,
-      action: starAdvice,
+      action: `${preNote(dStarStep)}${starAdvice}`,
       blast:  `Affects all roles that resolve via this * column (any role without a more-specific dedicated column). Not role-specific.`
     });
   }
