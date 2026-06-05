@@ -512,6 +512,10 @@ button.matrix-export { margin-left: auto; }
 /* ── Field View mode ──────────────────────────────────── */
 .fc-section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
 .fc-section h2 { font-size: 13px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+.fc-summary-link { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; font: inherit; cursor: pointer; border-radius: 6px; }
+.fc-summary-link:hover .perm-chip { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fc-summary-why { font-size: 12px; color: var(--accent); font-weight: 600; }
+.fc-summary-link:hover .fc-summary-why { text-decoration: underline; }
 table.fc-table { border-collapse: collapse; width: 100%; font-size: 12px; }
 table.fc-table th, table.fc-table td { border: 1px solid var(--border); padding: 5px 10px; vertical-align: middle; }
 table.fc-table th { background: #f0f2f5; font-weight: 600; text-align: left; white-space: nowrap; }
@@ -2859,6 +2863,15 @@ function drillIntoMatrixCell(sheetName, blockIdx, operationName) {
   $('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// Field View → Trace: explain why this user gets the combined result. Field View already holds
+// the right block/field/roles/conditions in the shared inputs, so we just switch to Trace and
+// evaluate the same set — non-destructive, and Trace handles the multi-role cascade correctly.
+function drillFieldToTrace() {
+  setAppMode('single');
+  runEvaluate();
+  $('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function buildMatrixCSV() {
   const lines = [['Sheet', 'Block', 'BlockLabel', 'Operation', 'OperationLabel', 'EffectivePermission', 'PermissionName', 'ConditionsApplied']];
   for (const sheetName of ['Entities', 'Transactions', 'Tasks']) {
@@ -3235,10 +3248,15 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       `<h2>This user's effective permission</h2>` +
       `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">` +
       `<span>For ${fieldLabel}:</span>` +
-      `<span class="perm-chip cell-${combined.final}">${combined.final} — ${PERM_NAME[combined.final]}</span>` +
+      `<button type="button" class="fc-summary-link" title="Open the full step-by-step in Trace">` +
+        `<span class="perm-chip cell-${combined.final}">${combined.final} — ${PERM_NAME[combined.final]}</span>` +
+        `<span class="fc-summary-why">see why &rarr;</span>` +
+      `</button>` +
       (rows.length > 1 ? `<span style="color:var(--muted);">— the most permissive of their ${rows.length} roles</span>` : '') +
-      `</div>`;
+      `</div>` +
+      `<div class="matrix-hint" style="margin-top:10px;">💡 Click the result to open the full step-by-step explanation in <strong>Trace</strong>.</div>`;
     host.appendChild(summary);
+    summary.querySelector('.fc-summary-link').addEventListener('click', drillFieldToTrace);
   }
 
   // ── Section 1: Role Access Table ─────────────────────────
