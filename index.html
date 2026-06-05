@@ -531,8 +531,16 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 .fc-option-letter { font-size: 11px; font-weight: 700; color: var(--accent); padding-top: 1px; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
 .fc-option-body { font-size: 12px; line-height: 1.6; }
 .fc-option-blast { font-size: 11px; color: var(--muted); margin-top: 2px; }
-.fc-option.fc-na { opacity: 0.4; }
-.fc-option.fc-na .fc-option-body { text-decoration: line-through; color: var(--muted); font-style: italic; text-decoration: none; }
+.fc-option.fc-na { opacity: 0.45; }
+.fc-option.fc-na .fc-option-body { color: var(--muted); font-style: italic; }
+.fc-option-do { font-size: 12.5px; }
+.fc-warn { font-size: 12px; color: var(--warning-text); background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 4px; padding: 5px 9px; margin-bottom: 5px; }
+.fc-why { margin-top: 5px; }
+.fc-why > summary { cursor: pointer; font-size: 11px; color: var(--muted); list-style: none; display: inline-flex; align-items: center; gap: 4px; user-select: none; }
+.fc-why > summary::-webkit-details-marker { display: none; }
+.fc-why > summary::before { content: '▸'; font-size: 9px; }
+.fc-why[open] > summary::before { content: '▾'; }
+.fc-why > div { font-size: 11px; color: var(--muted); margin-top: 3px; padding-left: 12px; border-left: 2px solid var(--border); }
 
 </style>
 </head>
@@ -2767,19 +2775,19 @@ function computeFieldCoverageRows(block, operationName, roles, siteLevel, entity
 
     let via;
     if (trace.shortCircuit) {
-      via = 'No column → DB default';
+      via = "Role's default access level";
     } else {
       const stopStep = hasMatchedColumn
         ? trace.groupA[0].steps.find(s => s.stop)
         : (trace.common ? trace.common.steps.find(s => s.stop) : null);
       if (!stopStep || !stopStep.cell) {
-        via = isFilteredOut ? 'Column filtered by conditions' : 'DB default';
+        via = isFilteredOut ? 'Column switched off by record properties' : "Role's default access level";
       } else if (stopStep.cell.row === 'op') {
         const isStar = trace.starColumn && ('col' + trace.starColumn.columnIndex) === stopStep.cell.col;
-        via = isStar ? 'Op × * cell' : `Op × ${roleName} cell`;
+        via = isStar ? 'Shared * column (this field)' : `${roleName}'s value on this field`;
       } else {
         const isStar = trace.starColumn && ('col' + trace.starColumn.columnIndex) === stopStep.cell.col;
-        via = isStar ? 'Permissions × * cell' : `Permissions × ${roleName} cell`;
+        via = isStar ? 'Shared * column (Permissions row)' : `${roleName}'s Permissions-row value`;
       }
     }
 
@@ -2799,135 +2807,125 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   const hasDedicated = block.roleColumns.some(rc => rc.name === roleName);
   const opRow        = operationName ? block.operations.find(o => o.name === operationName) : null;
   const esc          = escapeHtml;
+  const T            = `<strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>`;
+  const role         = `<strong>${esc(roleName)}</strong>`;
+  const fld          = operationName ? `“${esc(operationName)}”` : null;
+  const cur          = (v) => `<em>${normCode(v) === 'X' ? 'blank' : normCode(v)}</em>`;
   const options      = [];
 
-  // Cascade precedence: a lever at step K only takes effect if no earlier cell (step < K) is
-  // non-X — otherwise the cascade stops there first and the later change does nothing. Compute
-  // the cells that currently block each lever so the advice is honest (the user spotted that
-  // changing the DB default has no effect while Permissions × role is still set).
+  // Rules are read top-to-bottom and the FIRST one with a value wins. So a lever only works if no
+  // earlier cell already has a value — otherwise the earlier one decides and this change is ignored.
+  // blockersBefore lists those earlier cells in plain words (+ a technical label for the "Why?").
   const roleColIdx = matchedCol ? matchedCol.columnIndex : null;
   const starColIdx = trace.starColumn ? trace.starColumn.columnIndex : null;
   const perms      = block.permissions || [];
   const blockersBefore = (K) => {
     if (roleColIdx == null) return [];
     const out = [];
-    const add = (n, label, val) => { if (n < K && val && normCode(val) !== 'X') out.push(`${label} = ${normCode(val)}`); };
+    const add = (n, plain, tech, val) => { if (n < K && val && normCode(val) !== 'X') out.push({ plain, tech: `${tech} = ${normCode(val)}` }); };
     if (opRow) {
-      add(1, `${esc(operationName)} × ${esc(roleName)}`, opRow.values[roleColIdx]);
-      if (starColIdx != null) add(2, `${esc(operationName)} × *`, opRow.values[starColIdx]);
+      add(1, `the ${fld} row, ${esc(roleName)} column`, `${esc(operationName)} × ${esc(roleName)}`, opRow.values[roleColIdx]);
+      if (starColIdx != null) add(2, `the ${fld} row, shared * column`, `${esc(operationName)} × *`, opRow.values[starColIdx]);
     }
-    add(3, `Permissions × ${esc(roleName)}`, perms[roleColIdx]);
-    if (starColIdx != null) add(4, `Permissions × *`, perms[starColIdx]);
+    add(3, `the Permissions row, ${esc(roleName)} column`, `Permissions × ${esc(roleName)}`, perms[roleColIdx]);
+    if (starColIdx != null) add(4, `the Permissions row, shared * column`, `Permissions × *`, perms[starColIdx]);
     return out;
   };
-  const preNote = (K) => {
+  const precondition = (K) => {
     const b = blockersBefore(K);
     if (!b.length) return '';
-    return `<strong>⚠ Has no effect on its own:</strong> the cascade stops earlier at ${b.join(', ')} — set ${b.length > 1 ? 'those cells' : 'that cell'} to <em>X</em> first, then apply this. `;
+    return `<strong>Won't work on its own.</strong> ${esc(roleName)} already gets a value from ${b.map(x => x.plain).join(' and ')}, and that's used first. Blank ${b.length > 1 ? 'those cells' : 'that cell'} (set to X) before this helps.`;
+  };
+  const whyBlocked = (K) => {
+    const b = blockersBefore(K);
+    return b.length ? ` Earlier rules ${b.map(x => x.tech).join(', ')} are read before this and stop the lookup.` : '';
   };
 
-  // A — set operation cell for role's dedicated matched column
+  // A — set this field's cell for the role's own column
   if (!operationName) {
-    options.push({ letter: 'A', applicable: false, reason: 'No field selected — Option A sets a field-level cell. Select a specific field, or use Option B for the block-level Permissions row.' });
+    options.push({ letter: 'A', applicable: false, reason: 'Pick a specific field first — this option changes a single field. (Or use B for the whole record.)' });
   } else if (!opRow) {
-    options.push({ letter: 'A', applicable: false, reason: `Field row "${esc(operationName)}" is not in the spreadsheet for block "${esc(block.identifier)}" — the row would need to be added first.` });
+    options.push({ letter: 'A', applicable: false, reason: `There's no ${fld} row for this record in the sheet — it would have to be added first.` });
   } else if (!matchedCol) {
-    options.push({ letter: 'A', applicable: false, reason: `Role "${esc(roleName)}" has no matched dedicated column in this block (column absent or filtered by entity conditions).` });
+    options.push({ letter: 'A', applicable: false, reason: `${esc(roleName)} doesn't have its own column on this record (it's missing, or switched off by this record's properties).` });
   } else {
-    const cur = opRow.values[matchedCol.columnIndex] || 'X';
     options.push({
       letter: 'A', applicable: true,
-      action: `Set the <strong>${esc(operationName)} × ${esc(roleName)}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`,
-      blast:  `Narrowest change: affects only this field ("${esc(operationName)}") for this role ("${esc(roleName)}") in this block ("${esc(block.identifier)}").`
+      plain:  `On the ${fld} row, set ${role}'s cell to ${T}. (Currently ${cur(opRow.values[matchedCol.columnIndex])}.)`,
+      affects:`Just this one field for ${role} on this record — the most precise change.`,
+      why:    `Field row × ${esc(roleName)} column. It's the first thing the resolver reads for this field, so it decides the result outright.`
     });
   }
 
-  // B — set Permissions row cell for role's dedicated matched column
+  // B — set the Permissions-row cell for the role's own column
   if (!matchedCol) {
-    options.push({ letter: 'B', applicable: false, reason: `Role "${esc(roleName)}" has no matched dedicated column — the Permissions row cell for this role would have no effect.` });
+    options.push({ letter: 'B', applicable: false, reason: `${esc(roleName)} doesn't have its own column on this record, so there's nothing to set on the Permissions row. Use C or F instead.` });
   } else {
-    const cur = (block.permissions || [])[matchedCol.columnIndex] || 'X';
     options.push({
       letter: 'B', applicable: true,
-      action: `${preNote(3)}Set the <strong>Permissions × ${esc(roleName)}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`,
-      blast:  `Affects all fields in block "${esc(block.identifier)}" for role "${esc(roleName)}" that don't have a more-specific field-level entry (field cells at steps 1–2 take precedence).`
+      precondition: precondition(3),
+      plain:  `On the <strong>Permissions</strong> row, set ${role}'s cell to ${T}. (Currently ${cur(perms[matchedCol.columnIndex])}.)`,
+      affects:`Every field on this record for ${role} that doesn't have its own value.`,
+      why:    `Permissions row × ${esc(roleName)} column — used for any field that has no specific value of its own.${whyBlocked(3)}`
     });
   }
 
-  // C — change role DB default (uses the role's ACTUAL stored default, not a guess)
-  const subst   = trace.substitutions.find(s => s.role === roleName);
-  const curNote = subst
-    ? ` (currently <em>X</em> — not set, so the system substitutes the GP fallback ${subst.resolved})`
-    : ` (currently <em>${normCode(roleDefault)}</em>)`;
+  // C — change the role's default access level
+  const subst = trace.substitutions.find(s => s.role === roleName);
+  const curDef = subst
+    ? ` (currently not set, so the system-wide default — <strong>${subst.resolved}</strong> — is used.)`
+    : ` (currently ${cur(roleDefault)}.)`;
   options.push({
     letter: 'C', applicable: true,
-    action: `${preNote(5)}Set <strong>${esc(roleName)}.DefaultPermission</strong> in the Roles DB to <strong>${targetPerm}</strong>${curNote}.`,
-    blast:  `Wide blast radius: affects all blocks in all sheets where this role either has no column (Group B) or falls through all four sheet steps to the DB default.`
+    precondition: precondition(5),
+    plain:  `Change ${role}'s <strong>default access level</strong> (in the Roles table) to ${T}.${curDef}`,
+    affects:`This role on <em>every</em> record where it has no specific value — not just this one. Usually too broad to fix a single field.`,
+    why:    `Role.DefaultPermission, used only when none of the sheet rules give this role an answer.${whyBlocked(5)}`
   });
 
-  // D — modify * (catch-all) column cell
+  // D — change the shared (*) column
   if (!trace.starColumn) {
-    options.push({ letter: 'D', applicable: false, reason: 'No matching * (catch-all) column for the current entity conditions.' });
+    options.push({ letter: 'D', applicable: false, reason: `There's no shared (*) column in effect for this record's properties.` });
   } else {
     const starIdx = trace.starColumn.columnIndex;
-    let starAdvice, dStarStep;
+    let onRow, dStarStep, techCell;
     const gA = trace.groupA[0];
-    if (gA) {
-      const stopStep = gA.steps.find(s => s.stop);
-      if (stopStep && stopStep.n === 2 && opRow) {
-        const cur = opRow.values[starIdx] || 'X';
-        dStarStep = 2;
-        starAdvice = `Set the <strong>${esc(operationName)} × *</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
-      } else if (stopStep && stopStep.n === 4) {
-        const cur = (block.permissions || [])[starIdx] || 'X';
-        dStarStep = 4;
-        starAdvice = `Set the <strong>Permissions × *</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
-      } else {
-        dStarStep = opRow ? 2 : 4;
-        const label = operationName ? `${esc(operationName)} × *` : 'Permissions × *';
-        starAdvice = `To intercept via the * column (col${starIdx}): set the <strong>${label}</strong> cell to <strong>${targetPerm}</strong>.`;
-      }
-    } else if (trace.common) {
-      const stopStep = trace.common.steps.find(s => s.stop && s.cell);
-      const isOpRow  = stopStep && stopStep.cell.row === 'op';
-      const cur      = isOpRow ? (opRow ? opRow.values[starIdx] || 'X' : 'X') : (block.permissions || [])[starIdx] || 'X';
-      const cellLabel = isOpRow ? `${esc(operationName)} × *` : 'Permissions × *';
-      dStarStep = isOpRow ? 2 : 4;
-      starAdvice = `Set the <strong>${cellLabel}</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong> — currently <em>${cur}</em>.`;
-    } else {
-      dStarStep = opRow ? 2 : 4;
-      const label = operationName ? `${esc(operationName)} × *` : 'Permissions × *';
-      starAdvice = `Set the <strong>${label}</strong> cell (col${starIdx}) to <strong>${targetPerm}</strong>.`;
-    }
+    if (gA && gA.steps.find(s => s.stop && s.n === 2) && opRow) { onRow = fld; dStarStep = 2; techCell = `${esc(operationName)} × *`; }
+    else if (gA && gA.steps.find(s => s.stop && s.n === 4))      { onRow = '<strong>Permissions</strong>'; dStarStep = 4; techCell = `Permissions × *`; }
+    else if (trace.common && (trace.common.steps.find(s => s.stop && s.cell) || {}).cell && trace.common.steps.find(s => s.stop && s.cell).cell.row === 'op') { onRow = fld; dStarStep = 2; techCell = `${esc(operationName)} × *`; }
+    else { onRow = operationName ? '<strong>Permissions</strong>' : '<strong>Permissions</strong>'; dStarStep = opRow ? 4 : 4; techCell = `Permissions × *`; }
+    const starVal = dStarStep === 2 && opRow ? opRow.values[starIdx] : perms[starIdx];
     options.push({
       letter: 'D', applicable: true,
-      action: `${preNote(dStarStep)}${starAdvice}`,
-      blast:  `Affects all roles that resolve via this * column (any role without a more-specific dedicated column). Not role-specific.`
+      precondition: precondition(dStarStep),
+      plain:  `On the shared <strong>*</strong> column, set the ${onRow} cell to ${T}. (Currently ${cur(starVal)}.)`,
+      affects:`Every role that relies on the shared column (anyone without their own column here) — not just ${role}.`,
+      why:    `${techCell}. The shared * column is the fallback for roles without their own column.${whyBlocked(dStarStep)}`
     });
   }
 
-  // E — condition mismatch: role's column exists but is filtered out
+  // E — the role's column is switched off by the record's properties
   const filteredCols = trace.unmatchedColumns.filter(rc => rc.name === roleName);
   if (filteredCols.length === 0) {
-    options.push({ letter: 'E', applicable: false, reason: `No columns for "${esc(roleName)}" were excluded by entity conditions.` });
+    options.push({ letter: 'E', applicable: false, reason: `None of ${esc(roleName)}'s columns are switched off by this record's properties.` });
   } else {
-    const cols = filteredCols.map(rc => `col${rc.columnIndex}`).join(', ');
     options.push({
       letter: 'E', applicable: true,
-      action: `${filteredCols.length} column(s) for "${esc(roleName)}" (${cols}) are excluded by the current entity conditions. Either adjust the conditions (left pane) to match those columns, or set the condition cells in those columns to <strong>X</strong> (don't care) so they always apply.`,
-      blast:  `Setting a condition cell to X makes that column active for all records regardless of entity state — affects every role that column covers.`
+      plain:  `${role}'s column is switched off by this record's current properties, so its values are ignored. Either change the properties (left panel) or set those condition cells to blank so the column always applies.`,
+      affects:`Setting a condition to blank turns that column on for all records, for every role in it.`,
+      why:    `Columns ${filteredCols.map(rc => 'col' + rc.columnIndex).join(', ')} have condition values that don't match the current record, so they're excluded from the lookup.`
     });
   }
 
-  // F — add a dedicated column for this role (role has no column at all)
+  // F — give the role its own column
   if (hasDedicated) {
-    options.push({ letter: 'F', applicable: false, reason: `Role "${esc(roleName)}" already has a dedicated column in block "${esc(block.identifier)}".` });
+    options.push({ letter: 'F', applicable: false, reason: `${esc(roleName)} already has its own column on this record.` });
   } else {
-    const cellTarget = operationName ? `<strong>${esc(operationName)}</strong> row` : '<strong>Permissions</strong> row';
     options.push({
       letter: 'F', applicable: true,
-      action: `Add a new column for <strong>${esc(roleName)}</strong> in block "${esc(block.identifier)}" and set the ${cellTarget} cell to <strong>${targetPerm}</strong>. This gives the role its own configuration, independent of the * catch-all.`,
-      blast:  `Most targeted fix when no dedicated column exists: affects only role "${esc(roleName)}" in this block.`
+      plain:  `Give ${role} its own column on this record and set its ${operationName ? fld + ' value' : 'Permissions value'} to ${T}.`,
+      affects:`Only ${role} on this record — the cleanest fix when a role has no column yet.`,
+      why:    `Adds a dedicated column so ${esc(roleName)} no longer falls back to the shared * column or its default here.`
     });
   }
 
@@ -2942,16 +2940,23 @@ function fieldLowerLever(block, operationName, row, targetPerm) {
   const roleName = row.role;
   const t = row.trace;
   const tRank = PERM_RANK[targetPerm];
+  const T = `<strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>`;
+  const role = `<strong>${esc(roleName)}</strong>`;
   const opRow = operationName ? block.operations.find(o => o.name === operationName) : null;
   const subst = t.substitutions.find(s => s.role === roleName);
   const resolvedDefault = subst ? subst.resolved : normCode(row.roleDefault);
 
-  const dbAction = subst
-    ? `No controlling cell for this field — the role falls through to its DB default, currently <em>X</em> (not set), which the system substitutes with the GP fallback <strong>${resolvedDefault}</strong>. Lower the <strong>GP fallback</strong> (System config) to <strong>${targetPerm}</strong> — this lowers every role with an unset default at once — or set <strong>${esc(roleName)}.DefaultPermission</strong> explicitly to <strong>${targetPerm}</strong>.`
-    : `The role falls through to its DB default <em>${resolvedDefault}</em>. Set <strong>${esc(roleName)}.DefaultPermission</strong> to <strong>${targetPerm}</strong>.`;
-  const dbBlast = subst
-    ? `The GP fallback affects every role with an X (unset) default across all records; a per-role default change affects this role everywhere it falls through.`
-    : `Affects this role everywhere it falls through to its DB default.`;
+  const dbLever = subst
+    ? {
+        plain: `${role} has no value of its own for this record, so it uses the <strong>system-wide default</strong> (currently <strong>${resolvedDefault}</strong>). Lower the system-wide default (System config, top-left) to ${T} — or give ${role} its own default of ${T} in the Roles table.`,
+        affects: `The system-wide default lowers <em>every</em> role that has no default set, everywhere. A per-role default change affects only ${role}, but on every record it has no specific value.`,
+        why: `Role.DefaultPermission is X (unset) → substituted with the system fallback ${resolvedDefault}; this is the value producing ${row.effective}.`
+      }
+    : {
+        plain: `${role} has no value of its own for this record, so it uses its <strong>default access level</strong> (currently <strong>${resolvedDefault}</strong>). Set ${role}'s default to ${T} in the Roles table.`,
+        affects: `Affects ${role} on every record where it has no specific value.`,
+        why: `Role.DefaultPermission = ${resolvedDefault} is the value producing ${row.effective}.`
+      };
 
   const cellLever = (stop) => {
     const colIdx  = parseInt(stop.cell.col.replace('col', ''), 10);
@@ -2960,29 +2965,30 @@ function fieldLowerLever(block, operationName, row, targetPerm) {
     let cur = 'X';
     if (rowKind === 'op' && opRow) cur = opRow.values[colIdx] || 'X';
     else if (rowKind === 'perm')   cur = (block.permissions || [])[colIdx] || 'X';
-    const colLabel = isStar ? '*' : esc(roleName);
-    const rowLabel = rowKind === 'op' ? esc(operationName) : 'Permissions';
+    const rowLabel  = rowKind === 'op' ? `the ${`“${esc(operationName)}”`} row` : 'the <strong>Permissions</strong> row';
+    const colLabel  = isStar ? 'the shared <strong>*</strong> column' : `${role}'s column`;
+    const techCell  = `${rowKind === 'op' ? esc(operationName) : 'Permissions'} × ${isStar ? '*' : esc(roleName)}`;
     return {
-      action: `Set the <strong>${rowLabel} × ${colLabel}</strong> cell to <strong>${targetPerm}</strong> — currently <em>${cur}</em>. The cascade stops here, so this cell is producing ${row.effective}.`,
-      blast: isStar
-        ? `Catch-all (*) cell — lowering it affects every role that resolves through *, not just ${esc(roleName)}.`
+      plain: `On ${rowLabel}, set ${colLabel} to ${T} (currently <em>${normCode(cur) === 'X' ? 'blank' : normCode(cur)}</em>). This is the entry that's currently giving ${row.effective}.`,
+      affects: isStar
+        ? `The shared * column affects <em>every</em> role without its own column here — not just ${role}.`
         : (rowKind === 'perm'
-            ? `Affects all fields in block "${esc(block.identifier)}" for ${esc(roleName)} without a more-specific field cell.`
-            : `Affects only this field for ${esc(roleName)} in this block.`)
+            ? `Affects every field on this record for ${role} without its own value.`
+            : `Affects only this field for ${role} on this record.`),
+      why: `${techCell} is where the lookup stops for ${esc(roleName)}.`
     };
   };
 
-  // Group A: single controlling lever = where its own cascade stopped.
+  // Role with its own column: the single controlling entry is where its lookup stopped.
   if (t.groupA.length) {
     const stop = t.groupA[0].steps.find(s => s.stop);
     if (stop && stop.cell && stop.n !== 5) return cellLever(stop);
-    return { action: dbAction, blast: dbBlast };
+    return dbLever;
   }
+  // Default already wins outright (and the shared column never gets read).
+  if (t.shortCircuit) return dbLever;
 
-  // Short-circuit (Group B default already wins): DB default is the lever; the * path never ran.
-  if (t.shortCircuit) return { action: dbAction, blast: dbBlast };
-
-  // Group B (no column) / common path: effective = MAX(DB default, * catch-all). Lower whichever exceed target.
+  // No own column: result is the higher of (default, shared * column). Lower whichever exceed target.
   const commonResult = t.common ? t.common.result : 'X';
   const commonStop   = t.common ? t.common.steps.find(s => s.stop && s.cell) : null;
   const defAbove     = PERM_RANK[resolvedDefault] > tRank;
@@ -2991,13 +2997,14 @@ function fieldLowerLever(block, operationName, row, targetPerm) {
   if (defAbove && commonAbove) {
     const c = cellLever(commonStop);
     return {
-      action: `${dbAction}<br><strong>And</strong> the catch-all path also gives <strong>${commonResult}</strong>: ${c.action}`,
-      blast: `${dbBlast} ${c.blast}`
+      plain: `Two things give ${role} a high value here, and <strong>both</strong> must come down:<br>• ${dbLever.plain}<br>• ${c.plain}`,
+      affects: `${dbLever.affects} ${c.affects}`,
+      why: `${dbLever.why} ${c.why}`
     };
   }
-  if (defAbove)    return { action: dbAction, blast: dbBlast };
+  if (defAbove)    return dbLever;
   if (commonAbove) return cellLever(commonStop);
-  return { action: dbAction, blast: dbBlast };
+  return dbLever;
 }
 
 function renderFieldMode(block, operationName, rows, targetPerm, combined) {
@@ -3006,7 +3013,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
 
   // No roles configured → nothing real to compute. Prompt the user.
   if (!rows.length) {
-    host.innerHTML = `<div class="empty-state"><div class="big">Add a role to begin</div>Field View evaluates each of the user's roles against this field. Add at least one role on the left.<div class="empty-state-hint">Each role uses its actual DB default — set it per role so the results match what the system computes.</div></div>`;
+    host.innerHTML = `<div class="empty-state"><div class="big">Add a role to begin</div>Field View checks each of the user's roles against this field. Add at least one role on the left.<div class="empty-state-hint">Set each role's default access level so the results match exactly what the system would calculate.</div></div>`;
     return;
   }
 
@@ -3021,7 +3028,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">` +
       `<span>For ${fieldLabel}:</span>` +
       `<span class="perm-chip cell-${combined.final}">${combined.final} — ${PERM_NAME[combined.final]}</span>` +
-      `<span style="color:var(--muted);">= MAX across ${rows.length} role(s)</span>` +
+      (rows.length > 1 ? `<span style="color:var(--muted);">— the most permissive of their ${rows.length} roles</span>` : '') +
       `</div>`;
     host.appendChild(summary);
   }
@@ -3113,51 +3120,51 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
     return hdr;
   };
 
-  // Render a single instruction (action + optional scope note) inside a role block.
-  const appendLever = (roleBlock, letterText, action, blast, na, reason) => {
+  // Render one lever inside a role block: optional warning, the plain instruction,
+  // an "Also affects" note, and a collapsible plain-English "Why?" with the mechanics.
+  const appendLever = (roleBlock, letterText, lever) => {
     let optsDiv = roleBlock.querySelector('.fc-options');
     if (!optsDiv) { optsDiv = document.createElement('div'); optsDiv.className = 'fc-options'; roleBlock.appendChild(optsDiv); }
     const optDiv = document.createElement('div');
-    optDiv.className = 'fc-option' + (na ? ' fc-na' : '');
+    optDiv.className = 'fc-option' + (lever.applicable === false ? ' fc-na' : '');
     const letter = document.createElement('div');
     letter.className = 'fc-option-letter';
     letter.textContent = letterText;
     optDiv.appendChild(letter);
     const body = document.createElement('div');
     body.className = 'fc-option-body';
-    if (na) {
-      body.textContent = reason;
+    if (lever.applicable === false) {
+      body.textContent = lever.reason;
     } else {
-      body.innerHTML = action;
-      if (blast) {
-        const b = document.createElement('div');
-        b.className = 'fc-option-blast';
-        b.innerHTML = `<strong>Scope:</strong> ${blast}`;
-        body.appendChild(b);
-      }
+      let html = '';
+      if (lever.precondition) html += `<div class="fc-warn">${lever.precondition}</div>`;
+      html += `<div class="fc-option-do">${lever.plain}</div>`;
+      if (lever.affects) html += `<div class="fc-option-blast"><strong>Also affects:</strong> ${lever.affects}</div>`;
+      if (lever.why)     html += `<details class="fc-why"><summary>Why?</summary><div>${lever.why}</div></details>`;
+      body.innerHTML = html;
     }
     optDiv.appendChild(body);
     optsDiv.appendChild(optDiv);
   };
 
-  const fieldLabelText = operationName ? `"${escapeHtml(operationName)}"` : `${escapeHtml(block.identifier)}`;
+  const fieldLabelText = operationName ? `“${escapeHtml(operationName)}”` : `this record`;
 
   // On target exactly → done.
   if (cRank === tRank) {
     const p = document.createElement('p');
     p.className = 'advisor-intro';
     p.style.color = '#059669';
-    p.innerHTML = `This user's effective permission for ${fieldLabelText} is already exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>. No change needed.`;
+    p.innerHTML = `This user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}. Nothing to change.`;
     advisor.appendChild(p);
     host.appendChild(advisor);
     return;
   }
 
   if (cRank < tRank) {
-    // ── RAISE: combined is below target ⇒ every role is below target. Raising any ONE to target is enough. ──
+    // ── RAISE ── combined below target ⇒ every role below target; raising any ONE to target is enough.
     const intro = document.createElement('p');
     intro.className = 'advisor-intro';
-    intro.innerHTML = `This user's effective permission is <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>, <strong>below</strong> target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. The result is the MAX across roles, so raising <strong>any one</strong> role to ${targetPerm} brings the user to ${targetPerm}. Inapplicable options are greyed out.`;
+    intro.innerHTML = `Right now this user gets <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, which is <strong>less than</strong> the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. A user always gets their most permissive role, so you only need to raise <strong>one</strong> role to ${targetPerm}. Here are the ways to do that for each role (greyed-out ones don't apply):`;
     advisor.appendChild(intro);
 
     for (const r of rows.filter(r => PERM_RANK[r.effective] < tRank)) {
@@ -3165,15 +3172,15 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       const roleBlock = document.createElement('div');
       roleBlock.className = 'fc-role-block';
       roleBlock.appendChild(roleHeader(r.role, r.effective));
-      for (const opt of opts) appendLever(roleBlock, opt.letter, opt.action, opt.blast, !opt.applicable, opt.reason);
+      for (const opt of opts) appendLever(roleBlock, opt.letter, opt);
       advisor.appendChild(roleBlock);
     }
   } else {
-    // ── LOWER: combined is above target. Because of MAX with no "deny", EVERY role above target must be lowered. ──
+    // ── LOWER ── combined above target; because access can't be taken away, EVERY role above target must come down.
     const aboveRows = rows.filter(r => PERM_RANK[r.effective] > tRank);
     const intro = document.createElement('p');
     intro.className = 'advisor-intro';
-    intro.innerHTML = `This user's effective permission is <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong>, <strong>above</strong> target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. RBS combines roles with MAX and has no "deny", so <strong>all ${aboveRows.length} role(s) below must be lowered to ${targetPerm}</strong> — lowering only some leaves the higher ones winning. (Roles already at or below ${targetPerm} are fine.)`;
+    intro.innerHTML = `Right now this user gets <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, which is <strong>more than</strong> the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. A user always gets their most permissive role and access can't be taken away, so <strong>every</strong> role above ${targetPerm} has to be brought down — bringing down only some won't help. ${aboveRows.length} role(s) need lowering (the rest are already fine):`;
     advisor.appendChild(intro);
 
     for (const r of aboveRows) {
@@ -3181,7 +3188,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       const roleBlock = document.createElement('div');
       roleBlock.className = 'fc-role-block';
       roleBlock.appendChild(roleHeader(r.role, r.effective));
-      appendLever(roleBlock, '↓', lever.action, lever.blast, false);
+      appendLever(roleBlock, '↓', { applicable: true, precondition: lever.precondition, plain: lever.plain, affects: lever.affects, why: lever.why });
       advisor.appendChild(roleBlock);
     }
   }
