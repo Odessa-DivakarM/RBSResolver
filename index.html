@@ -3446,7 +3446,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
     // Consolidate: lead with the single best change across all roles, tuck the rest behind "Other ways".
     const intro = document.createElement('p');
     intro.className = 'advisor-intro';
-    intro.innerHTML = `Right now this user gets <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, which is <strong>less than</strong> the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. A user always gets their most permissive role, so you only need <strong>one</strong> change:`;
+    intro.innerHTML = `Right now this user gets <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, which is <strong>less than</strong> the target <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong>. A user always gets their most permissive role, so <strong>any one</strong> of the changes below is enough to lift them to ${targetPerm} — you don't need to do them all. The simplest is recommended first; the rest (including the other role's options) are under <em>"Other ways"</em>.`;
     advisor.appendChild(intro);
 
     const belowRows = rows.filter(r => PERM_RANK[r.effective] < tRank);
