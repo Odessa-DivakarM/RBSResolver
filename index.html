@@ -2479,7 +2479,10 @@ function runTests() {
   // ── REACHABILITY (lower): applying ALL grouped lower levers lands the user on target ──
   const lowerCases = [
     { name: 'lower all-X via system default', block: FB(['F', 'N', 'X']), op: null, roles: [['Account Manager', 'X'], ['Sales Manager', 'X'], ['Clerk', 'X']], target: 'M', site: 'F' },
-    { name: 'lower own Permissions cell',      block: FB(['F', 'F', 'X']), op: null, roles: [['Account Manager', 'F']], target: 'R', site: 'F' }
+    { name: 'lower own Permissions cell',      block: FB(['F', 'F', 'X']), op: null, roles: [['Account Manager', 'F']], target: 'R', site: 'F' },
+    // Column-holder whose cells are all blank → currently rides its DB default. Lowering should
+    // set its own field cell (intercept), not the global default, and still reach the target.
+    { name: 'lower column-holder on DB default via own field cell', block: FB(['X', 'X', 'X'], [{ name: 'Amount', values: ['X', 'X', 'X'] }]), op: 'Amount', roles: [['Account Manager', 'F'], ['Sales Manager', 'F']], target: 'R', site: 'F' }
   ];
   const runLower = (tc) => {
     const roles = mkRoles(tc.roles), entity = tc.entity || {};
@@ -3208,10 +3211,36 @@ function fieldLowerLever(block, operationName, row, targetPerm, hasColumnHolder)
     };
   };
 
-  // Role with its own column: the single controlling entry is where its lookup stopped.
+  // Role with its own column: the narrowest lowering is to set its OWN cell. A role's own cells
+  // (field row, then Permissions row) are read before the shared * column and the DB default, so
+  // setting one intercepts whatever the role currently resolves to — even when the cell is blank
+  // and the role is currently falling through to the * or its default. Prefer this over changing
+  // the global DB default, which would affect the role on every record.
   if (t.groupA.length) {
-    const stop = t.groupA[0].steps.find(s => s.stop);
-    if (stop && stop.cell && stop.n !== 5) return cellLever(stop);
+    const matched = t.matchedColumns.find(rc => rc.name === roleName);
+    if (matched) {
+      const colIdx = matched.columnIndex;
+      const useOp  = !!opRow;  // a specific field is selected → set that field's cell (narrowest)
+      const curVal = useOp ? (opRow.values[colIdx] || 'X') : ((block.permissions || [])[colIdx] || 'X');
+      const stop   = t.groupA[0].steps.find(s => s.stop);
+      const ridesDefault = stop && stop.n === 5;
+      const ridesStar    = stop && stop.cell && t.starColumn && ('col' + t.starColumn.columnIndex) === stop.cell.col;
+      const rowLabel = useOp ? `the “${esc(operationName)}” row` : 'the <strong>Permissions</strong> row';
+      let plain = `On ${rowLabel}, set ${role}'s own cell to ${T} (currently <em>${normCode(curVal) === 'X' ? 'blank' : normCode(curVal)}</em>).`;
+      if (ridesDefault)   plain += ` ${role} has a column here but this cell is blank, so it currently falls through to its default access level (${resolvedDefault}) — setting the cell pins it here <em>without</em> touching the global default.`;
+      else if (ridesStar) plain += ` This cell is blank, so the role currently picks up the shared * value — setting its own cell overrides that, here only.`;
+      return {
+        kind: 'roleCell',
+        groupKey: 'rolecell:' + roleName + ':' + (useOp ? 'op' : 'perm') + ':' + colIdx,
+        current: normCode(curVal) === 'X' ? 'blank' : normCode(curVal),
+        apply: { kind: useOp ? 'opCell' : 'permCell', op: operationName, col: colIdx, value: targetPerm },
+        plain,
+        affects: useOp
+          ? `Affects only this field for ${role} on this record.`
+          : `Affects every field on this record for ${role} without its own value.`,
+        why: `${useOp ? esc(operationName) : 'Permissions'} × ${esc(roleName)} is read before the shared * column and the DB default, so setting it intercepts the result.`
+      };
+    }
     return dbLever;
   }
   // Default already wins outright (and the shared column never gets read).
