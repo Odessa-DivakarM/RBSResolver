@@ -529,6 +529,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 .advisor-intro { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
 .fc-role-block { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; background: #fafbfc; }
 .fc-role-block-hdr { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.fc-reco-note { font-size: 12px; color: var(--muted); font-style: italic; margin: 0 12px 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
 .fc-options { padding: 10px 12px 12px; }
 .fc-option { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; margin-bottom: 8px; align-items: start; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
 .fc-option:last-child { margin-bottom: 0; }
@@ -3468,6 +3469,15 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       headline.className = 'fc-role-block';
       headline.appendChild(roleHeader(best.r.role, best.r.effective));
       appendLever(headline, best.opt, { reco: true });
+      // Make it clear the role isn't special: raising ANY one of the user's roles lifts them to
+      // target (MAX). This is shown because it's the simplest; name the interchangeable roles.
+      const otherRoles = perRole.map(p => p.r).filter(r => r !== best.r).map(r => r.role);
+      if (otherRoles.length) {
+        const note = document.createElement('div');
+        note.className = 'fc-reco-note';
+        note.innerHTML = `<strong>${escapeHtml(best.r.role)}</strong> is shown because it's the simplest — but raising <strong>any one</strong> of the user's roles to ${targetPerm} works just as well (${otherRoles.map(escapeHtml).join(', ')}). See <em>"Other ways"</em> for those.`;
+        headline.appendChild(note);
+      }
       advisor.appendChild(headline);
     }
 
