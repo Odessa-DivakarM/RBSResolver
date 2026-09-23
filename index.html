@@ -505,9 +505,13 @@ code.inline {
 .matrix-row > .matrix-perm { padding: 6px 12px; text-align: center; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-weight: 700; cursor: pointer; user-select: none; min-width: 56px; transition: filter .15s; }
 .matrix-row > .matrix-perm:hover { filter: brightness(0.92); outline: 2px solid var(--accent); outline-offset: -2px; }
 .matrix-row > .matrix-perm[title]:hover::after { /* tooltip handled by native title */ }
-/* Field allows more than its record does: letter stays the spreadsheet value, a marker flags the cap. */
-.matrix-row > .matrix-perm.capped { background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0,0,0,.07) 6px 8px); }
-.matrix-row > .matrix-perm .cap-mark { font-size: 10px; font-weight: 400; margin-left: 4px; }
+/* Field allows more than its record does: the letter stays the spreadsheet value; hatching + 🔒 flag
+   the cap. Shared by Role Matrix cells, the Trace badge and the Field View result chip. Declared after
+   the .cell-* rules so their `background` shorthand doesn't clear the hatching. */
+.capped { background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0,0,0,.07) 6px 8px); }
+.cap-mark { font-size: 10px; font-weight: 400; margin-left: 4px; }
+.final-badge.capped { position: relative; }
+.final-badge .cap-mark { position: absolute; top: 6px; right: 8px; font-size: 16px; margin: 0; }
 .matrix-row > .op-name .op-label { color: var(--muted); font-size: 11px; margin-left: 6px; }
 .matrix-row.hidden, .matrix-block.hidden { display: none; }
 .matrix-empty { padding: 30px 20px; text-align: center; color: var(--muted); font-size: 13px; background: var(--panel); border: 1px dashed var(--border); border-radius: 6px; }
@@ -753,7 +757,23 @@ function recordLimitText(lim) {
   return `This field allows ${f}, but the record itself is ${e} for this user, so this field isn't shown. The record needs Read or higher first.`;
 }
 
-const RBS_ONLY_NOTE = 'Based on the security spreadsheet only. Other settings can restrict this further but never loosen it: the transaction\'s own permission, a read-only parent record, and the screen\'s own rules.';
+// Marker + tooltip for a field its record holds back — one wording for Role Matrix, Trace and Field View.
+const CAP_MARK_HTML = '<span class="cap-mark" aria-hidden="true">🔒</span>';
+function capTitle(limited, fieldPerm, entityPerm) {
+  const e = `${entityPerm} (${PERM_NAME[entityPerm]})`;
+  return limited === 'readOnly'
+    ? `${PERM_NAME[fieldPerm]} in the sheet — but read-only here: the record is only ${e}.`
+    : `${PERM_NAME[fieldPerm]} in the sheet — but hidden here: the record is ${e}, so this field isn't shown.`;
+}
+// Field View's result chip ("F — Full"), marked when the record holds the field back.
+function resultChipHtml(perm, lim) {
+  const limited = lim && lim.effect.limitedByRecord;
+  if (!limited) return `<span class="perm-chip cell-${perm}">${perm} — ${PERM_NAME[perm]}</span>`;
+  const title = escapeHtml(capTitle(limited, lim.fieldPerm, lim.entityPerm) + ' Click to see the full trace.');
+  return `<span class="perm-chip cell-${perm} capped" title="${title}">${perm} — ${PERM_NAME[perm]}${CAP_MARK_HTML}</span>`;
+}
+
+const RBS_ONLY_NOTE ='Based on the security spreadsheet only. Other settings can restrict this further but never loosen it: the transaction\'s own permission, a read-only parent record, and the screen\'s own rules.';
 
 function maxPerm() {
   let best = 'X';
@@ -1917,6 +1937,12 @@ function buildFinalCard(t, lim) {
   const badge = document.createElement('div');
   badge.className = 'final-badge cell-' + t.final;
   badge.textContent = t.final;
+  // Same cue as the Role Matrix cell: the letter stays the sheet value, hatching + 🔒 flag the cap.
+  if (lim && lim.effect.limitedByRecord) {
+    badge.classList.add('capped');
+    badge.insertAdjacentHTML('beforeend', CAP_MARK_HTML);
+    badge.title = capTitle(lim.effect.limitedByRecord, lim.fieldPerm, lim.entityPerm);
+  }
   card.appendChild(badge);
   const info = document.createElement('div');
   info.className = 'final-info';
@@ -2768,6 +2794,30 @@ function runTests() {
     return { ok, detail: `ignored=${u.ignored}, forms=${u.usedOnForms}, noRecord=${u.usedWithoutRecord}` };
   };
 
+  // Held-back marker: Role Matrix cell, Trace badge and Field View chip must agree.
+  const markerCases = [
+    { name: 'record R, field F → all three marked "read-only here"', block: A1(['X'], ['F']), site: 'R', expMarked: true, expText: 'read-only here' },
+    { name: 'record N, field F → all three marked "hidden here"',    block: A1(['N'], ['F']), site: 'R', expMarked: true, expText: 'hidden here' },
+    { name: 'record M, field F → none marked',                       block: A1(['M'], ['F']), site: 'R', expMarked: false },
+    { name: 'Transactions sheet → none marked',                     block: A1(['X'], ['F']), site: 'R', sheet: 'Transactions', expMarked: false }
+  ];
+  const runMarker = (tc) => {
+    const roles = mkRoles([['Role A', 'X']]), sheet = tc.sheet || 'Entities';
+    const t = evaluate(tc.block, 'Fld', roles, tc.site, {});
+    const lim = recordLimitFor(sheet, tc.block, 'Fld', roles, tc.site, {});
+    const badge = buildFinalCard(t, lim).querySelector('.final-badge');
+    const chipHost = document.createElement('div'); chipHost.innerHTML = resultChipHtml(t.final, lim);
+    const chip = chipHost.firstElementChild;
+    const entityPerm = evaluate(tc.block, null, roles, tc.site, {}).final;
+    const cell = buildMatrixRowsTable(tc.block, sheet, 0, [{ operation: 'Fld', label: '', finalPerm: t.final }], entityPerm).querySelector('.matrix-perm');
+    const els = [badge, chip, cell];
+    const marked = els.map(el => el.classList.contains('capped') && !!el.querySelector('.cap-mark'));
+    const letterKept = badge.firstChild.textContent === t.final && cell.firstChild.textContent === t.final;
+    const ok = marked.every(m => m === tc.expMarked) && letterKept
+      && (!tc.expMarked || els.every(el => (el.title || '').includes(tc.expText)));
+    return { ok, detail: `badge/chip/cell marked=${marked.join('/')}, letter kept=${letterKept}` };
+  };
+
   const runParity = (tc) => {
     const roles = mkRoles(tc.roles), entity = tc.entity || {};
     if (tc.kind === 'eval') {
@@ -2791,7 +2841,8 @@ function runTests() {
     runGroup('Advisor — lowering reaches target', lowerCases, runLower),
     runGroup('UI effect — record access caps the field', uiCases, runUiEffect),
     runGroup('Framework parity — role case, filtered * column', parityCases, runParity),
-    runGroup('Framework parity — which block is used', usageCases, runUsage)
+    runGroup('Framework parity — which block is used', usageCases, runUsage),
+    runGroup('Held-back marker — Matrix, Trace and Field View agree', markerCases, runMarker)
   ];
   const tp = groups.reduce((s, g) => s + g.passed, 0);
   const tt = groups.reduce((s, g) => s + g.total, 0);
@@ -3094,13 +3145,8 @@ function buildMatrixRowsTable(block, sheetName, blockIdx, rows, entityPerm) {
     const limited = sheetName === 'Entities' ? fieldUiEffect(entityPerm, r.finalPerm).limitedByRecord : null;
     if (limited) {
       permCell.classList.add('capped');
-      const mark = document.createElement('span');
-      mark.className = 'cap-mark';
-      mark.textContent = '🔒';
-      permCell.appendChild(mark);
-      permCell.title = limited === 'readOnly'
-        ? `${PERM_NAME[r.finalPerm]} in the sheet — but read-only here: the record is only ${entityPerm} (${PERM_NAME[entityPerm]}). Click to see the full trace.`
-        : `${PERM_NAME[r.finalPerm]} in the sheet — but hidden here: the record is ${entityPerm} (${PERM_NAME[entityPerm]}), so this field isn't shown. Click to see the full trace.`;
+      permCell.insertAdjacentHTML('beforeend', CAP_MARK_HTML);
+      permCell.title = capTitle(limited, r.finalPerm, entityPerm) + ' Click to see the full trace.';
     }
     permCell.addEventListener('click', () => drillIntoMatrixCell(sheetName, blockIdx, r.operation));
     rowEl.appendChild(permCell);
@@ -3606,7 +3652,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
       `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">` +
       `<span>For ${fieldLabel}:</span>` +
       `<button type="button" class="fc-summary-link" title="Open the full step-by-step in Trace">` +
-        `<span class="perm-chip cell-${combined.final}">${combined.final} — ${PERM_NAME[combined.final]}</span>` +
+        resultChipHtml(combined.final, lim) +
       `</button>` +
       (rows.length > 1 ? `<span style="color:var(--muted);">— the most permissive of their ${rows.length} roles</span>` : '') +
       `</div>`;
