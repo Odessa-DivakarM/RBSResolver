@@ -3100,7 +3100,7 @@ function buildMatrixRowsTable(block, sheetName, blockIdx, rows, entityPerm) {
       permCell.appendChild(mark);
       permCell.title = limited === 'readOnly'
         ? `${PERM_NAME[r.finalPerm]} in the sheet — but read-only here: the record is only ${entityPerm} (${PERM_NAME[entityPerm]}). Click to see the full trace.`
-        : `${PERM_NAME[r.finalPerm]} in the sheet — but hidden here: the record is ${entityPerm} (${PERM_NAME[entityPerm]}), so the form doesn't open. Click to see the full trace.`;
+        : `${PERM_NAME[r.finalPerm]} in the sheet — but hidden here: the record is ${entityPerm} (${PERM_NAME[entityPerm]}), so this field isn't shown. Click to see the full trace.`;
     }
     permCell.addEventListener('click', () => drillIntoMatrixCell(sheetName, blockIdx, r.operation));
     rowEl.appendChild(permCell);
