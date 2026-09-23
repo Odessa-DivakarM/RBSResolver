@@ -4,8 +4,8 @@ This document describes how the Odessa.Framework's RBS sheet resolves into a
 final permission for a given user, target, and field. Every claim has been
 verified against the framework source; relevant files are linked inline.
 
-The **RBS Resolver** app implements this exact algorithm, with one
-intentional divergence noted at the end.
+The **RBS Resolver** app implements this exact algorithm; its two deliberate,
+flagged divergences are listed at the end (§11).
 
 ---
 
@@ -26,8 +26,10 @@ Within each block:
 - **Row 1 (header)**: column 0 is the block identifier. Column 1 is either a
   human-readable label *or* the first role column when its value is `*`. Role
   columns continue until the first blank header cell.
-- **Subsequent rows up to `Permissions`**: condition rows. Each cell is a
-  `Bool3` value (`blank` / `X` / `Y` / `N`).
+- **Subsequent rows up to `Permissions`**: condition rows — **Entities sheet
+  only**. Each cell is a `Bool3` value (`blank` / `X` / `Y` / `N`). The
+  Transactions and Tasks parsers are built with `allowConditions: false`
+  (`TransactionPermissionTableParser`, `TaskPermissionTableParser`).
 - **`Permissions` row**: per-column default permission for the block.
 - **Rows after `Permissions`**: operation rows (one per field / transaction /
   task name). Each cell is a permission code.
@@ -143,10 +145,33 @@ Before cascade evaluation, each role column is run through a decision table to
 determine whether it applies to the current request. A column matches when
 **all** of the following hold:
 
-1. The user "has the role" (for `*` columns: always; for named role columns:
-   the user must have that role).
+1. The request "has the role" of the column. Role names are compared
+   **case-insensitively** (`PermissionRequest.HasRole` → `EqualsIgnoreCase`;
+   `PermissionResultBuilder` also uses `EqualsIgnoreCase` for the Group A/B split
+   and the step-5 role default).
 2. For each entity condition row, the column's `Bool3` value is `X` (don't
    care), or the entity's actual value matches (`T`/`F`).
+
+`PermissionTableExecutor.Run` issues **two** requests: a *user request*
+(`SelectMany` with the user's roles — the `*` column never matches it, since no
+user holds a role named `*`) and, only when the table has a `*` column, a
+*common request* (`SelectSingle` with the single role `*`, still subject to the
+`*` column's conditions). The common request's result is the "matched `*`
+column" used below.
+
+> **Known framework defect — a `*` column switched off by its conditions throws.**
+> When the table has a `*` column but none matches the record,
+> `DecisionTable.SelectSingle` returns `null`; `PermissionTableExecutor.Run`
+> passes it on unchecked and `PermissionResultBuilder` throws
+> `NullReferenceException` the first time it needs the common value. That
+> happens unless an unconfigured role default of `F` short-circuits, or every
+> matched user-role column has a non-`X` value in its Permissions row **and** in
+> every operation row (all operations are built in one pass). With no `*`
+> column at all, the non-null all-`X` `CommonUserRolePermission.Instance` is
+> used and nothing throws. Reproduced against `PermissionTableExecutor`
+> directly. The visualizer detects this (`frameworkWouldFail`) and shows a
+> warning in Trace, Role Matrix (⚠ on the record pill) and Field View, while
+> still showing the value the rules would give.
 
 A column that doesn't match is excluded entirely — it contributes neither cell
 values nor a cascade. The same role can match through multiple columns
@@ -191,9 +216,9 @@ For **each matched column** whose role name is held by the user (production:
 | Step | What's read                                           | Where                |
 | ---- | ----------------------------------------------------- | -------------------- |
 | 1    | Operation row × this column                           | Sheet                |
-| 2    | Operation row × **matched `*` column**                | Sheet (skipped if no `*` column matches) |
+| 2    | Operation row × **matched `*` column**                | Sheet (`X` if the table has no `*` column; throws if it has one but none matches — §5) |
 | 3    | Permissions row × this column                         | Sheet                |
-| 4    | Permissions row × **matched `*` column**              | Sheet (same skip rule) |
+| 4    | Permissions row × **matched `*` column**              | Sheet (same rule as step 2) |
 | 5    | `userRole.DefaultPermission`                          | DB (already resolved at login) |
 
 The cascade stops at the first cell whose value is not `X`. Steps 1 and 2 are
@@ -214,7 +239,7 @@ This branch runs when:
 
 | Step | What's read                                                                              |
 | ---- | ---------------------------------------------------------------------------------------- |
-| 1    | If a matched `*` column exists: Operation row × `*` (else `X`)                            |
+| 1    | If a matched `*` column exists: Operation row × `*` (no `*` column: `X`; filtered out: throws — §5) |
 | 2    | If still `X`: Permissions row × matched `*` column                                       |
 
 ```
@@ -233,18 +258,97 @@ If `final == X`, the effective UI verdict is **None**.
 
 ## 7. UI effects
 
-| Final | Effect                                                         |
-| ----- | -------------------------------------------------------------- |
-| `F`   | All actions, all fields editable                               |
-| `M`   | Open and edit; admin actions hidden                            |
-| `R`   | Open form, fields read-only, action buttons hidden             |
-| `N`   | Form blocked entirely, entity hidden from grids/menus          |
-| `X`   | Treated as `N` at the UI layer                                 |
+Every UI check is `permission.Covers(desired)`; the screen only asks for `Read`
+or `Modify`, so for fields and actions `F` and `M` behave identically.
 
-Field-level `R` on a `Full`-entity form makes that one field read-only inside
-an otherwise editable form. Field-level `N` hides/blanks it. Field-level
-permissions only matter once entity-level access ≥ `R` (otherwise the form
-isn't reachable).
+| Entity-level | Effect                                                                  |
+| ------------ | ----------------------------------------------------------------------- |
+| `F` / `M`    | Record editable; each field/action then limited by its own value (§7.1) |
+| `R`          | Record read-only — every field and action disabled                      |
+| `N` / `X`    | Entity not visible (every field hidden); grids show no columns; entity API read denied |
+
+Whether a form can be opened from a menu or command is mostly decided by the
+**Transactions** sheet: `CommandHelper.IsAccessible` → `SeekTransactionPermission`
+for transaction, browse and view form commands. The exception is `OpenSite`
+with a URL naming a form, which checks this sheet (static block, operation row
+`Read` or else the entity default, must cover `Read`).
+
+The only places a search of the source (`Permission.Full`, `IsFull`) finds `F` treated differently from `M`: the Group B short-circuit (§6.1); workflow
+work-item filtering (`DomainService.FilterWorkItemsBasedOnRBS` →
+`GetAllowedTransactions`, requires `Full` on the Transactions sheet); the Outlook
+add-in entity list (`IsPermissionGrantedForAddIn(Permission.Full)`).
+
+The table above is the **entity-level** effect. A field's (or action's) effect
+combines the entity-level value with the field-level value — the field can only
+make things *more* restrictive than its record, never less.
+
+### 7.1 Combining entity and field
+
+Verified in `Lw.System/Model`:
+
+- `EntityPropertiesProxy.IsVisible  = Visible && entityPerm.Covers(Read)`
+- `EntityPropertiesProxy.IsReadOnly = ReadOnly || IsOwnerEntityReadOnly(…) || !entityPerm.Covers(Modify)`
+- `FieldPropertiesProxy.IsEnabled   = !entity.IsReadOnly && Enabled && fieldPerm.Covers(Modify)`
+- `FieldPropertiesProxy.IsVisible   = entity.IsVisible && Visible && fieldPerm.Covers(Read)`
+
+`entityPerm` is `PermissionResult.DefaultPermission`; `fieldPerm` is
+`OperationPermissionOrDefault(field)` (falls back to `DefaultPermission` when the
+field has no row). `Permission.Covers(X)` is always false. **Actions use the same
+gate**: `ActionContext.IsActionEnabled` returns `FieldProperties(actionName).IsEnabled`.
+
+Both values come from **one** `SeekEntityPermission` call — one `PermissionResult` —
+and `PermissionResultBuilder` resolves each of them independently over **all** of the
+user's roles (unconfigured-role defaults + every matched column) *before* they are
+combined. So the cap uses the user's combined entity-level result and combined
+field-level result, never one role column's values.
+
+| Entity-level | Field `F` / `M`       | Field `R`             | Field `N` / `X` |
+| ------------ | --------------------- | --------------------- | --------------- |
+| `F` / `M`    | editable              | visible, read-only    | hidden          |
+| `R`          | **visible, read-only** | visible, read-only    | hidden          |
+| `N` / `X`    | hidden                | hidden                | hidden          |
+
+Example (FRWK-25772): Permissions row `X`, role default `X`, site-level `R` → entity
+`R`; field row `F` → field value `F`, but the field is **read-only**. The visualizer
+keeps showing the true `F` value and flags that the record holds it back (Trace,
+Role Matrix 🔒 marker, Field View, CSV `LimitedByRecord` column).
+
+This applies to **Entities-sheet fields and actions only**. Tasks have no field
+layer (`SeekTaskPermission().DefaultPermission`).
+
+### 7.2 What can restrict a field further (outside the visualizer)
+
+These can only make a field *more* restricted, never less, and the visualizer
+cannot see them — its answer is "per RBS", not the final screen state:
+
+- **Transaction permission** (Transactions sheet). Launching a transaction form
+  from the UI checks only the transaction permission
+  (`CommandHelper`, `BaseTransactionFormController.ValidateTransactionAccess`); the
+  REST API additionally requires the entity-level permission
+  (`AuthorizationHelper.IsTransactionPermissionGranted`:
+  `entity.Covers(desired) && transaction.Covers(desired)`). Inside any form, the
+  entity's fields are still gated by §7.1. The visualizer does not combine sheets.
+- **Owner entity read-only** — `IsOwnerEntityReadOnly` walks the owner chain.
+- **Behaviour input rules** — `Enabled` / `ReadOnly` / `Visible` set by behaviours.
+
+One exception runs the other way: actions performed on an entity that is **not**
+part of the root transaction (nested transactions) skip the RBS and input-rule
+check entirely (`ActionContext.IsActionEnabled` returns true when
+`!BelongsToRootTransaction`).
+
+### 7.3 Transactions and Tasks
+
+| Value | Transactions sheet | Tasks sheet |
+| ----- | ------------------ | ----------- |
+| `F`   | All modes open, including Create; also counts for workflow work items | Offered when setting up jobs |
+| `M`   | All modes open, including Create; **not** enough for workflow work items | Offered when setting up jobs |
+| `R`   | View and Edit open; Create refused | Not offered |
+| `N` / `X` | Cannot be opened; not offered in menus | Not offered |
+
+Sources: `CommandHelper.IsAccessible` (Create needs `Modify`, other modes
+`Read`), `AbstractTransactionFormModel.RaiseAccessDeniedIfRequired`,
+`DomainService.FilterWorkItemsBasedOnRBS` → `GetAllowedTransactions` (`Full`),
+`JobTaskConfigQueryables` (tasks need `Modify`).
 
 ---
 
@@ -469,11 +573,35 @@ if (_permissionTable.IsDynamic && model == null)
 ```
 
 **Consequence.** A conditional block re-evaluates for every entity instance;
-its result never lands in `UserPermissionCache`. And it cannot be evaluated
-without an entity instance (`model`) — block-level lookups against a dynamic
-table will throw. The visualizer always passes a synthetic `entityState`, so
-this manifests in production as `ArgumentNullException` when caller code
-forgets to pass the entity.
+its result never lands in `UserPermissionCache`.
+
+**It is only used when a record is present — a missing record never
+throws.** (A filtered-out `*` column does — §5.) `PermissionTableExecutorCache` keeps one *static* and one
+*dynamic* executor per entity name (a second block of the same kind replaces
+the first). `SecurityManager.SeekPermission` asks for the dynamic one only when
+a record is passed (`ExecutorOrDefault(name, type, entity != null)`):
+
+| Lookup | Callers (examples) | Block used |
+|---|---|---|
+| With a record — `SeekEntityPermission(IEntity)` | form fields and actions (`AbstractEntity.IsPermissionGrantedImpl`); grid cell values with `EnableCellSecurity` | dynamic, else static |
+| By name only — `SeekEntityPermission(string)` | grid access and grid columns (`GridPanelHelper`), entity API read, REST transaction check | **static only** |
+| Neither block exists | — | role defaults (§9.5) |
+
+So an entity whose only block is conditional is governed by it on forms, but by
+the user's role defaults for grids and API reads. The `ArgumentNullException`
+guard in `PermissionTableExecutor.Run` is reachable only by calling `Run`
+directly with no model; `SecurityManager` never hands a dynamic executor to a
+record-less lookup. The visualizer evaluates each block as if a record with the
+chosen condition values is open (the form path), and says which lookups use a
+block (`blockUsage`): Trace shows a note, and Role Matrix tags the block
+*open records only*, *grids / API only*, or *ignored (replaced by a later
+block)*. Blocks are selected by position, so both blocks of a same-named pair
+are reachable.
+
+Workbook regeneration is stricter: `RbsFileGenerator` builds a dictionary keyed
+by block identifier from the reference workbook (`ToDictionary(x => x.Key.Trim(), …)`),
+so a reference workbook with two blocks of the same name makes regeneration
+throw `ArgumentException`.
 
 ### 9.8 The visualizer cannot detect any of these
 
@@ -514,9 +642,10 @@ list before assuming the workbook is at fault.
 - **Duplicate role columns each cascade independently.** With two
   `Account Manager` columns matching simultaneously, the cascade runs twice —
   once per column — and the results are `MAX`'d.
-- **The `*` column is itself conditional.** If no `*` column matches the entity
-  state, steps 2/4 of the cascade are skipped, and the common-only path
-  returns `X`.
+- **The `*` column is itself conditional.** If the table has a `*` column but
+  none matches the entity state, the framework throws `NullReferenceException`
+  whenever it needs the shared value (known defect, §5). Only a table with no
+  `*` column at all treats the shared value as `X`.
 - **`OperationPermission` ≠ `OperationPermissionOrDefault`.** When the
   requested operation isn't a row in the block,
   `IPermissionResult.OperationPermission` returns `X` while
@@ -529,12 +658,20 @@ list before assuming the workbook is at fault.
 
 ## 11. Visualizer divergence
 
-The **RBS Resolver** app matches the algorithm above exactly, with one
-deliberate exception: when a workbook contains a value that
-`Permission.Parse` or `Bool3.Parse` would reject, the visualizer warns and
-coerces to `X` so exploration can continue. Production halts with a
-`ParseException` at load time. Banners explicitly call out which parser would
-have thrown, so the divergence is never silent.
+The **RBS Resolver** app matches the algorithm above, including case-insensitive
+role matching (§5) and the record-caps-field rule (§7.1). It departs from the
+framework in exactly two deliberate ways, and both are always flagged on screen:
+
+1. **Unparseable cells.** When a workbook contains a value that
+   `Permission.Parse` or `Bool3.Parse` would reject, the visualizer warns and
+   coerces it to `X` so exploration can continue. Production halts with a
+   `ParseException` at load time. Banners name the parser that would have thrown.
+2. **The filtered-`*` defect (§5).** Where the framework throws
+   `NullReferenceException`, the visualizer shows the value the rules would give
+   and a warning that the live system currently fails for that user and record.
+
+Not modelled (the visualizer says so where relevant): combining sheets
+(Transactions × Entities, §7.2), and anything decided outside the workbook (§9).
 
 ---
 

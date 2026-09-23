@@ -226,6 +226,8 @@ button.secondary:hover { border-color: var(--accent); color: var(--accent); }
   display: inline-block;
 }
 .final-info .ux { font-size: 13px; color: var(--muted); }
+.record-limit { font-size: 13px; color: var(--warning-text); background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 4px; padding: 7px 10px; margin-top: 8px; }
+.rbs-only-note { font-size: 11px; color: var(--muted); margin-top: 6px; }
 table.sheet {
   border-collapse: collapse;
   font-size: 12px;
@@ -503,6 +505,9 @@ code.inline {
 .matrix-row > .matrix-perm { padding: 6px 12px; text-align: center; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-weight: 700; cursor: pointer; user-select: none; min-width: 56px; transition: filter .15s; }
 .matrix-row > .matrix-perm:hover { filter: brightness(0.92); outline: 2px solid var(--accent); outline-offset: -2px; }
 .matrix-row > .matrix-perm[title]:hover::after { /* tooltip handled by native title */ }
+/* Field allows more than its record does: letter stays the spreadsheet value, a marker flags the cap. */
+.matrix-row > .matrix-perm.capped { background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0,0,0,.07) 6px 8px); }
+.matrix-row > .matrix-perm .cap-mark { font-size: 10px; font-weight: 400; margin-left: 4px; }
 .matrix-row > .op-name .op-label { color: var(--muted); font-size: 11px; margin-left: 6px; }
 .matrix-row.hidden, .matrix-block.hidden { display: none; }
 .matrix-empty { padding: 30px 20px; text-align: center; color: var(--muted); font-size: 13px; background: var(--panel); border: 1px dashed var(--border); border-radius: 6px; }
@@ -678,13 +683,77 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 // ============================================================
 const PERM_RANK = { X: 0, N: 1, R: 2, M: 3, F: 4 };
 const PERM_NAME = { F: 'Full', M: 'Modify', R: 'Read', N: 'None', X: 'Undefined' };
+// What each value means on screen, per sheet. Every framework check is Covers(Read) or
+// Covers(Modify), so for fields and actions Full and Modify behave the same. Whether a form can be
+// opened at all is decided by the Transactions sheet, not the entity value. Sources:
+// Entities — EntityPropertiesProxy / GridPanelHelper; Transactions — CommandHelper.IsAccessible,
+// AbstractTransactionFormModel.RaiseAccessDeniedIfRequired, GetAllowedTransactions (Full);
+// Tasks — JobTaskConfigQueryables (Modify).
 const UX_EFFECT = {
-  F: 'All actions enabled and all fields editable.',
-  M: 'Form opens for editing; admin actions hidden.',
-  R: 'Form opens read-only; action buttons hidden, fields not editable.',
-  N: 'Form blocked entirely; entity hidden from grids and menus.',
-  X: 'No rule resolved; effectively None &mdash; form blocked.'
+  Entities: {
+    F: 'Record is editable: fields and actions can be used, each still limited by its own row.',
+    M: 'Record is editable: fields and actions can be used, each still limited by its own row. (On screen, Modify and Full behave the same.)',
+    R: 'Record is read-only: every field and action is disabled.',
+    N: 'Record not shown: its fields are hidden and grids show no columns.',
+    X: 'No rule gives a value; treated as None &mdash; nothing is shown.'
+  },
+  Transactions: {
+    F: 'All modes can be opened, including Create. Also counts for workflow work items (those need Full).',
+    M: 'All modes can be opened, including Create. Not enough for workflow work items (those need Full).',
+    R: 'View and Edit can be opened; Create is refused (it needs Modify).',
+    N: 'Cannot be opened and is not offered in menus.',
+    X: 'No rule gives a value; treated as None &mdash; cannot be opened.'
+  },
+  Tasks: {
+    F: 'Offered when setting up jobs.',
+    M: 'Offered when setting up jobs.',
+    R: 'Not offered when setting up jobs (needs Modify).',
+    N: 'Not offered when setting up jobs.',
+    X: 'No rule gives a value; treated as None &mdash; not offered when setting up jobs.'
+  }
 };
+function uxEffect(sheet, perm) {
+  return (UX_EFFECT[sheet] || UX_EFFECT.Entities)[perm];
+}
+
+// What the UI actually lets the user do with one field (or action) of a record, combining the
+// record's own permission with the field's. Mirrors Lw.Sys.Model.FieldPropertiesProxy:
+//   IsEnabled = !entity.IsReadOnly && field.Covers(Modify)   (entity.IsReadOnly = !entity.Covers(Modify))
+//   IsVisible = entity.IsVisible && field.Covers(Read)       (entity.IsVisible  =  entity.Covers(Read))
+// Covers(X) is always false. A field can therefore only be LESS accessible than its record.
+// limitedByRecord: 'readOnly' = field allows editing but the record is only Read;
+//                  'blocked'  = field allows reading but the record is None / not set.
+function fieldUiEffect(entityPerm, fieldPerm) {
+  const e = PERM_RANK[normCode(entityPerm)], f = PERM_RANK[normCode(fieldPerm)];
+  const R = PERM_RANK.R, M = PERM_RANK.M;
+  let limitedByRecord = null;
+  if (e < R && f >= R) limitedByRecord = 'blocked';
+  else if (e === R && f >= M) limitedByRecord = 'readOnly';
+  return { visible: e >= R && f >= R, editable: e >= M && f >= M, limitedByRecord };
+}
+
+// Record-vs-field combination for a selected field. Only Entities-sheet fields are gated by
+// their record this way; Transactions and Tasks have no field layer, and the record level
+// itself (no field) has nothing to combine — those return null.
+function recordLimitFor(sheet, block, operationName, roles, siteLevel, entityState) {
+  if (sheet !== 'Entities' || !operationName || !block) return null;
+  const entityPerm = evaluate(block, null, roles, siteLevel, entityState).final;
+  const fieldPerm  = evaluate(block, operationName, roles, siteLevel, entityState).final;
+  return { entityPerm, fieldPerm, effect: fieldUiEffect(entityPerm, fieldPerm) };
+}
+
+// Plain-language explanation when the record holds a field back; '' when it doesn't.
+function recordLimitText(lim) {
+  if (!lim || !lim.effect.limitedByRecord) return '';
+  const f = `<strong>${lim.fieldPerm} — ${PERM_NAME[lim.fieldPerm]}</strong>`;
+  const e = `<strong>${lim.entityPerm} — ${PERM_NAME[lim.entityPerm]}</strong>`;
+  if (lim.effect.limitedByRecord === 'readOnly') {
+    return `This field allows ${f}, but the record itself is only ${e} for this user, so the field (or action) stays <strong>read-only</strong>. To make it editable, give the record Modify or higher.`;
+  }
+  return `This field allows ${f}, but the record itself is ${e} for this user, so this field isn't shown. The record needs Read or higher first.`;
+}
+
+const RBS_ONLY_NOTE = 'Based on the security spreadsheet only. Other settings can restrict this further but never loosen it: the transaction\'s own permission, a read-only parent record, and the screen\'s own rules.';
 
 function maxPerm() {
   let best = 'X';
@@ -916,6 +985,94 @@ function findMatchingStarColumn(block, entityState) {
   return null;
 }
 
+// The framework compares role names ignoring case (PermissionRequest.HasRole and
+// PermissionResultBuilder use EqualsIgnoreCase). Map a user's role name onto the block's own
+// column spelling, so every exact-name comparison downstream agrees with the framework.
+// evaluate() runs this for every role on every block and field (Role Matrix: tens of thousands of
+// calls), so the lookup is a per-block map built once — not a scan with localeCompare, which made a
+// 3000-block matrix ~80x slower.
+function roleKey(name) { return String(name).toLowerCase(); }
+function sameRoleName(a, b) { return roleKey(a) === roleKey(b); }
+const roleNameCache = new WeakMap(); // block → { n: column count, map: lower-cased name → column spelling }
+function roleNameIn(block, name) {
+  if (!name) return name;
+  let c = roleNameCache.get(block);
+  if (!c || c.n !== block.roleColumns.length) {
+    const map = new Map();
+    for (const rc of block.roleColumns) {
+      if (rc.name !== '*' && !map.has(roleKey(rc.name))) map.set(roleKey(rc.name), rc.name); // first column wins
+    }
+    c = { n: block.roleColumns.length, map };
+    roleNameCache.set(block, c);
+  }
+  const hit = c.map.get(roleKey(name));
+  return hit === undefined ? name : hit;
+}
+
+// Framework defect (Lw.System PermissionTableExecutor / PermissionResultBuilder): when the block has
+// a * column but none matches the record, DecisionTable.SelectSingle returns null and the builder
+// throws NullReferenceException the first time it needs the shared (*) value. Every field row is
+// built in the same pass, so one blank own-cell anywhere in the block is enough. Returns true when
+// the live system would fail for this user and record instead of producing a permission.
+function frameworkWouldFail(block, roles, siteLevel, entityState) {
+  if (!block.roleColumns.some(rc => rc.name === '*')) return false; // no * column → safe all-X stand-in
+  if (findMatchingStarColumn(block, entityState)) return false;
+  const site = normCode(siteLevel || 'F');
+  const resolved = roles.filter(r => r.name).map(r => {
+    const p = normCode(r.defaultPermission);
+    return { name: roleNameIn(block, r.name), perm: p === 'X' ? site : p };
+  });
+  const inTable = new Set(block.roleColumns.map(c => c.name));
+  if (maxPerm(...resolved.filter(r => !inTable.has(r.name)).map(r => r.perm)) === 'F') return false; // Full short-circuit
+  const userNames = new Set(resolved.map(r => r.name));
+  const matched = block.roleColumns.filter(rc => rc.name !== '*' && userNames.has(rc.name) && columnMatches(rc, block.conditions, entityState));
+  if (!matched.length) return true; // only the shared * path is left, and it is null
+  const perms = block.permissions || [];
+  return matched.some(rc => normCode(perms[rc.columnIndex]) === 'X'
+    || block.operations.some(o => normCode(o.values[rc.columnIndex]) === 'X'));
+}
+
+// Which of a sheet's blocks the framework actually uses for blocks[idx]. PermissionTableExecutorCache
+// keeps ONE block without conditions and ONE with conditions per name — a later block of the same
+// kind replaces an earlier one. Lookups that carry a record (forms) prefer the one with conditions;
+// lookups by name only (grids, API reads) use only the one without.
+function blockUsage(blocks, idx) {
+  const block = blocks[idx];
+  const isDyn = b => !!(b.conditions && b.conditions.length);
+  let lastStatic = -1, lastDynamic = -1;
+  blocks.forEach((b, i) => {
+    if (b.identifier !== block.identifier) return;
+    if (isDyn(b)) lastDynamic = i; else lastStatic = i;
+  });
+  const dyn = isDyn(block);
+  const ignored = idx !== (dyn ? lastDynamic : lastStatic);
+  return {
+    ignored,
+    usedOnForms: !ignored && (dyn || lastDynamic === -1),
+    usedWithoutRecord: !ignored && !dyn,
+    hasOtherKind: dyn ? lastStatic !== -1 : lastDynamic !== -1
+  };
+}
+
+// Plain-language note for Trace / Role Matrix when a block is not used everywhere; '' otherwise.
+function blockUsageText(blocks, idx) {
+  const u = blockUsage(blocks, idx);
+  if (u.ignored) return 'The system ignores this block: a later block with the same name replaces it.';
+  if (u.usedOnForms && u.usedWithoutRecord) return '';
+  if (u.usedOnForms) {
+    return u.hasOtherKind
+      ? 'The system uses this block (it has conditions) when a record is open. Grids and API reads use the other block with this name, the one without conditions.'
+      : 'The system uses this block (it has conditions) only when a record is open. Grids and API reads skip it and use the highest default access level among the user\'s roles instead.';
+  }
+  return 'Grids and API reads use this block. When a record is open, the system uses the other block with this name (the one with conditions) instead.';
+}
+
+const FRAMEWORK_FAIL_TEXT ='In the live system this record currently <strong>fails with an error</strong> for this user. ' +
+  'The shared <strong>*</strong> rule is switched off by this record\'s properties, and the system doesn\'t handle that case ' +
+  '(a known framework defect) — it errors instead of treating the shared rule as not set. ' +
+  'The result shown is what the rules give without that error. To avoid it, make the shared * rule apply to these properties, ' +
+  'or give each of this user\'s own columns a value in the Permissions row and in every field row.';
+
 function evaluate(block, operationName, userRoles, siteLevel, entityState) {
   const siteLevelPerm = normCode(siteLevel || 'F');
   const trace = {
@@ -940,13 +1097,15 @@ function evaluate(block, operationName, userRoles, siteLevel, entityState) {
   };
 
   // Pre-process: substitute role.defaultPermission == X with site-level value (mirrors UserContextHelper.cs).
+  // Role names are matched to columns ignoring case, as the framework does (see roleNameIn).
   const resolvedRoles = userRoles.map(r => {
+    const name = roleNameIn(block, r.name);
     const stored = normCode(r.defaultPermission);
     if (stored === 'X') {
-      trace.substitutions.push({ role: r.name, stored, resolved: siteLevelPerm });
-      return { name: r.name, defaultPermission: siteLevelPerm, _wasX: true, _stored: stored };
+      trace.substitutions.push({ role: name, stored, resolved: siteLevelPerm });
+      return { name, defaultPermission: siteLevelPerm, _wasX: true, _stored: stored };
     }
-    return { name: r.name, defaultPermission: stored, _wasX: false, _stored: stored };
+    return { name, defaultPermission: stored, _wasX: false, _stored: stored };
   });
 
   // Classify columns by condition match.
@@ -1303,14 +1462,19 @@ function selectSheet(s) {
   renderTabs();
   const sel = $('block');
   sel.innerHTML = '';
-  for (const b of parsed[s]) {
+  // Options are keyed by position, not name: a sheet can hold two blocks with the same name
+  // (one with conditions, one without), and both must be reachable.
+  const nameCount = {};
+  for (const b of parsed[s]) nameCount[b.identifier] = (nameCount[b.identifier] || 0) + 1;
+  parsed[s].forEach((b, i) => {
     const opt = document.createElement('option');
-    opt.value = b.identifier;
-    opt.textContent = b.identifier + (b.label ? ` — ${b.label}` : '');
+    opt.value = String(i);
+    const twin = nameCount[b.identifier] > 1 ? ` [${b.conditions.length ? 'with conditions' : 'no conditions'}, #${i + 1}]` : '';
+    opt.textContent = b.identifier + twin + (b.label ? ` — ${b.label}` : '');
     sel.appendChild(opt);
-  }
+  });
   if (parsed[s].length) {
-    sel.value = parsed[s][0].identifier;
+    sel.value = '0';
     selectBlock();
   } else {
     currentBlock = null;
@@ -1320,8 +1484,7 @@ function selectSheet(s) {
 
 $('block').addEventListener('change', selectBlock);
 function selectBlock() {
-  const id = $('block').value;
-  currentBlock = parsed[currentSheet].find(b => b.identifier === id) || null;
+  currentBlock = parsed[currentSheet][parseInt($('block').value, 10)] || null;
   const opSel = $('operation');
   opSel.innerHTML = '<option value="">— block-level (no operation) —</option>';
   if (currentBlock) {
@@ -1417,7 +1580,8 @@ function runEvaluate() {
   if (!currentBlock) return;
   const opName = $('operation').value || null;
   const trace = evaluate(currentBlock, opName, userRoles, siteLevelDefault, entityState);
-  renderResults(currentBlock, opName, trace);
+  const lim = recordLimitFor(currentSheet, currentBlock, opName, userRoles, siteLevelDefault, entityState);
+  renderResults(currentBlock, opName, trace, lim);
 }
 
 const siteSel = $('siteLevelDefault');
@@ -1679,12 +1843,16 @@ function buildNarrativeTrace(t) {
 // ============================================================
 // Rendering of results
 // ============================================================
-function renderResults(block, operationName, t) {
+function renderResults(block, operationName, t, lim) {
   const out = $('output');
   out.innerHTML = '';
 
   // ---- banners
   const banners = [];
+  if (frameworkWouldFail(block, userRoles, siteLevelDefault, t.entityState)) banners.push(FRAMEWORK_FAIL_TEXT);
+  const sheetBlocks = (parsed && parsed[currentSheet]) || [];
+  const usageText = sheetBlocks.includes(block) ? blockUsageText(sheetBlocks, sheetBlocks.indexOf(block)) : '';
+  if (usageText) banners.push(usageText);
   if (t.shortCircuit) banners.push('Short-circuit: a Group B role grants Full from its DB default. The block\'s role-column header was still read (to classify Group A vs B), but the Permissions row, operation rows, and the per-role 5-step cascade were all skipped.');
   if (userRoles.length === 0) {
     banners.push('User has no roles defined here. The visualizer still computes a result via the * column for exploration, but in production a logged-in user with no roles is rejected at FetchUserRoles in UserContextHelper.cs ("InvalidRolesForUser") before any sheet evaluation runs.');
@@ -1710,7 +1878,7 @@ function renderResults(block, operationName, t) {
   const masterRoles = new Set(parsed && parsed.roles || []);
   if (masterRoles.size) {
     for (const r of userRoles) {
-      if (r.name && !masterRoles.has(r.name)) {
+      if (r.name && ![...masterRoles].some(m => sameRoleName(m, r.name))) {
         banners.push(`Role "${r.name}" is not in the master Roles sheet — verify the spelling.`);
       }
     }
@@ -1722,7 +1890,7 @@ function renderResults(block, operationName, t) {
   }
 
   // ---- final card
-  out.appendChild(buildFinalCard(t));
+  out.appendChild(buildFinalCard(t, lim));
 
   // ---- mini sheet view
   out.appendChild(buildSheetPanel(block, operationName, t));
@@ -1734,7 +1902,16 @@ function renderResults(block, operationName, t) {
   if (block.conditions.length) out.appendChild(buildConditionsPanel(block));
 }
 
-function buildFinalCard(t) {
+function buildFinalCard(t, lim) {
+  const limitHtml = recordLimitText(lim);
+  // The badge stays the true spreadsheet value; the effect line reflects what the screen allows.
+  let effectHtml = uxEffect(currentSheet, t.final);
+  if (lim) {
+    const fx = lim.effect;
+    effectHtml = fx.editable ? 'This field is editable.'
+      : fx.visible ? 'This field is visible but read-only.'
+      : 'This field is hidden.';
+  }
   const card = document.createElement('div');
   card.className = 'final-card';
   const badge = document.createElement('div');
@@ -1750,7 +1927,9 @@ function buildFinalCard(t) {
       <summary style="font-size:11px; color:var(--muted); cursor:pointer;">Show calculation</summary>
       <div class="formula" style="margin-top:6px;">${makeFormula(t)}</div>
     </details>
-    <div class="ux">${UX_EFFECT[t.final]}</div>`;
+    <div class="ux">${effectHtml}</div>
+    ${limitHtml ? `<div class="record-limit">${limitHtml}</div>` : ''}
+    ${lim ? `<div class="rbs-only-note">${RBS_ONLY_NOTE}</div>` : ''}`;
   card.appendChild(info);
   return card;
 }
@@ -2502,6 +2681,105 @@ function runTests() {
     return { ok: after === tc.target, detail: `combined ${after} (want ${tc.target})` };
   };
 
+  // ── UI EFFECT: the record's own access caps what a field can do (FRWK-25772) ──
+  // Framework: FieldPropertiesProxy.IsEnabled = !entity.IsReadOnly && field.Covers(Modify);
+  // IsVisible = entity.IsVisible && field.Covers(Read). Both values come from the same
+  // PermissionResult, each resolved over ALL the user's roles before being combined.
+  const A1 = (perms, opVals, cols, conds) => makeBlock('U', '', cols || ['Role A'], perms, [{ name: 'Fld', values: opVals }], conds);
+  const EDIT = { visible: true, editable: true, limited: null };
+  const RO   = { visible: true, editable: false, limited: null };
+  const RO_CAP = { visible: true, editable: false, limited: 'readOnly' };
+  const HIDDEN = { visible: false, editable: false, limited: null };
+  const uiCases = [
+    { name: '1 FRWK-25772 repro — Perm X, field F, default X, GP R → read-only', block: A1(['X'], ['F']), roles: [['Role A', 'X']], site: 'R', expEval: 'F', exp: RO_CAP },
+    { name: '2 Perm M, field F → editable',                   block: A1(['M'], ['F']), roles: [['Role A', 'X']], site: 'R', expEval: 'F', exp: EDIT },
+    { name: '3 Perm R, field M, GP F → read-only',            block: A1(['R'], ['M']), roles: [['Role A', 'X']], site: 'F', expEval: 'M', exp: RO_CAP },
+    { name: '4 Perm F, field R → read-only (field restricts)', block: A1(['F'], ['R']), roles: [['Role A', 'X']], site: 'R', expEval: 'R', exp: RO },
+    { name: '5 Perm F, field N → hidden',                     block: A1(['F'], ['N']), roles: [['Role A', 'X']], site: 'R', expEval: 'N', exp: HIDDEN },
+    { name: '6 Perm N, field F → hidden (record blocks form)', block: A1(['N'], ['F']), roles: [['Role A', 'X']], site: 'R', expEval: 'F', exp: { visible: false, editable: false, limited: 'blocked' } },
+    { name: '7 all X, GP R → read-only',                      block: A1(['X'], ['X']), roles: [['Role A', 'X']], site: 'R', expEval: 'R', exp: RO },
+    { name: '8 Perm X, field F, GP M → editable',             block: A1(['X'], ['F']), roles: [['Role A', 'X']], site: 'M', expEval: 'F', exp: EDIT },
+    { name: '9 * Perm R stops before GP F → record R, field F read-only', block: A1(['R', 'X'], ['X', 'F'], ['*', 'Role A']), roles: [['Role A', 'X']], site: 'F', expEval: 'F', exp: RO_CAP },
+    { name: '10 A (Perm R, field F) + B not in block (default M) → record M → editable', block: A1(['R'], ['F']), roles: [['Role A', 'X'], ['Role B', 'M']], site: 'R', expEval: 'F', exp: EDIT },
+    { name: '11 A (Perm R, field F) + B own column (Perm M) → record M → editable', block: A1(['R', 'M'], ['F', 'X'], ['Role A', 'Role B']), roles: [['Role A', 'X'], ['Role B', 'X']], site: 'R', expEval: 'F', exp: EDIT },
+    { name: '12 other role grants Full by default → record F → editable', block: A1(['X'], ['F']), roles: [['Role A', 'X'], ['Clerk', 'F']], site: 'R', expEval: 'F', exp: EDIT },
+    { name: '13 field has no row → uses record value, never capped', block: A1(['X'], ['F']), op: 'Missing', roles: [['Role A', 'X']], site: 'R', expEval: 'R', exp: RO },
+    { name: '14 duplicate columns, IsActive=Y → record R, field F read-only', block: A1(['R', 'M'], ['F', 'X'], ['Role A', 'Role A'], [{ name: 'IsActive', values: ['Y', 'N'] }]), roles: [['Role A', 'X']], site: 'R', entity: { IsActive: 'T' }, expEval: 'F', exp: RO_CAP },
+    { name: '15 duplicate columns, IsActive=N → record M, field M editable', block: A1(['R', 'M'], ['F', 'X'], ['Role A', 'Role A'], [{ name: 'IsActive', values: ['Y', 'N'] }]), roles: [['Role A', 'X']], site: 'R', entity: { IsActive: 'F' }, expEval: 'M', exp: EDIT },
+    { name: '16 Transactions sheet → no record cap applied', sheet: 'Transactions', block: A1(['X'], ['F']), roles: [['Role A', 'X']], site: 'R', expEval: 'F', exp: null },
+    { name: '17 Tasks sheet → no record cap applied',        sheet: 'Tasks',        block: A1(['X'], ['F']), roles: [['Role A', 'X']], site: 'R', expEval: 'F', exp: null },
+    { name: '18 record level (no field) → nothing to cap',   block: A1(['X'], ['F']), op: null, roles: [['Role A', 'X']], site: 'R', expEval: 'R', exp: null }
+  ];
+  const runUiEffect = (tc) => {
+    const roles = mkRoles(tc.roles), entity = tc.entity || {};
+    const op = tc.op === undefined ? 'Fld' : tc.op;
+    const ev = evaluate(tc.block, op, roles, tc.site, entity).final;
+    const lim = recordLimitFor(tc.sheet || 'Entities', tc.block, op, roles, tc.site, entity);
+    if (tc.exp === null) return { ok: ev === tc.expEval && lim === null, detail: `evaluate=${ev} (want ${tc.expEval}), cap=${lim === null ? 'n/a' : JSON.stringify(lim.effect)}` };
+    const e = lim ? lim.effect : {};
+    const ok = ev === tc.expEval && e.visible === tc.exp.visible && e.editable === tc.exp.editable && e.limitedByRecord === tc.exp.limited;
+    return { ok, detail: `evaluate=${ev} (want ${tc.expEval}), record=${lim && lim.entityPerm}, visible=${e.visible}, editable=${e.editable}, limited=${e.limitedByRecord} (want ${tc.exp.visible}/${tc.exp.editable}/${tc.exp.limited})` };
+  };
+
+  // ── FRAMEWORK PARITY: behaviours read from Odessa.Framework and reproduced against its executor ──
+  // Role names: PermissionRequest.HasRole / PermissionResultBuilder use EqualsIgnoreCase.
+  // Filtered * column: DecisionTable.SelectSingle returns null → PermissionResultBuilder throws
+  // NullReferenceException whenever it has to read the common (*) permission.
+  const StarBlk = (perms, ops) => makeBlock('S', '', ['*', 'Role A'], perms, ops || [], [{ name: 'IsActive', values: ['Y', 'X'] }]);
+  const parityCases = [
+    { name: 'role name in different case still uses its column → N (not its default F)', kind: 'eval',
+      block: A1(['N'], ['N']), op: 'Fld', roles: [['role a', 'F']], site: 'R', expected: 'N' },
+    { name: 'different-case role is not "unconfigured" → no Full short-circuit', kind: 'eval',
+      block: A1(['N'], ['N']), op: null, roles: [['ROLE A', 'F']], site: 'R', expected: 'N' },
+    { name: 'different-case role alongside a column-less role → MAX(own column N, other default R) = R', kind: 'eval',
+      block: FB(['F', 'N', 'X']), op: null, roles: [['account manager', 'N'], ['Clerk', 'R']], site: 'F', expected: 'R' },
+    { name: 'crash: * switched off by condition, role cells blank', kind: 'crash',
+      block: StarBlk(['R', 'X'], [{ name: 'Fld', values: ['X', 'X'] }]), roles: [['Role A', 'M']], site: 'F', entity: { IsActive: 'F' }, expected: true },
+    { name: 'no crash: same block, * matches the record', kind: 'crash',
+      block: StarBlk(['R', 'X'], [{ name: 'Fld', values: ['X', 'X'] }]), roles: [['Role A', 'M']], site: 'F', entity: { IsActive: 'T' }, expected: false },
+    { name: 'no crash: * switched off, but every role cell has a value', kind: 'crash',
+      block: StarBlk(['R', 'R'], [{ name: 'Fld', values: ['X', 'F'] }]), roles: [['Role A', 'M']], site: 'F', entity: { IsActive: 'F' }, expected: false },
+    { name: 'crash: * switched off, one OTHER field row blank (all fields are built at once)', kind: 'crash',
+      block: StarBlk(['R', 'R'], [{ name: 'Fld', values: ['X', 'F'] }, { name: 'Other', values: ['X', 'X'] }]), roles: [['Role A', 'M']], site: 'F', entity: { IsActive: 'F' }, expected: true },
+    { name: 'crash: * switched off, user role has no column', kind: 'crash',
+      block: StarBlk(['R', 'R']), roles: [['Clerk', 'R']], site: 'F', entity: { IsActive: 'F' }, expected: true },
+    { name: 'no crash: * switched off, but a column-less role defaults to Full', kind: 'crash',
+      block: StarBlk(['R', 'X']), roles: [['Role A', 'M'], ['Clerk', 'F']], site: 'F', entity: { IsActive: 'F' }, expected: false },
+    { name: 'no crash: no * column at all, role cells blank', kind: 'crash',
+      block: A1(['X'], ['X']), roles: [['Role A', 'M']], site: 'F', entity: {}, expected: false }
+  ];
+  // Which block the framework actually uses: PermissionTableExecutorCache keeps the LAST static and
+  // the LAST conditional block per name; forms prefer the conditional one, record-less lookups
+  // (grids, API reads) use only the static one.
+  const SB = (id) => makeBlock(id, '', ['Role A'], ['R'], []);
+  const DB = (id) => makeBlock(id, '', ['Role A'], ['R'], [], [{ name: 'IsActive', values: ['Y'] }]);
+  const usageCases = [
+    { name: 'single block without conditions → used everywhere', blocks: [SB('E')], idx: 0, exp: { ignored: false, usedOnForms: true, usedWithoutRecord: true } },
+    { name: 'single block with conditions → forms only', blocks: [DB('E')], idx: 0, exp: { ignored: false, usedOnForms: true, usedWithoutRecord: false } },
+    { name: 'static + conditional pair: static → grids / API only', blocks: [SB('E'), DB('E')], idx: 0, exp: { ignored: false, usedOnForms: false, usedWithoutRecord: true } },
+    { name: 'static + conditional pair: conditional → forms only', blocks: [SB('E'), DB('E')], idx: 1, exp: { ignored: false, usedOnForms: true, usedWithoutRecord: false } },
+    { name: 'two static blocks: the earlier one is replaced', blocks: [SB('E'), SB('E')], idx: 0, exp: { ignored: true, usedOnForms: false, usedWithoutRecord: false } },
+    { name: 'two static blocks: the later one is live', blocks: [SB('E'), SB('E')], idx: 1, exp: { ignored: false, usedOnForms: true, usedWithoutRecord: true } },
+    { name: 'other names do not interfere', blocks: [SB('E'), DB('Other')], idx: 0, exp: { ignored: false, usedOnForms: true, usedWithoutRecord: true } }
+  ];
+  const runUsage = (tc) => {
+    const u = blockUsage(tc.blocks, tc.idx);
+    const ok = u.ignored === tc.exp.ignored && u.usedOnForms === tc.exp.usedOnForms && u.usedWithoutRecord === tc.exp.usedWithoutRecord;
+    return { ok, detail: `ignored=${u.ignored}, forms=${u.usedOnForms}, noRecord=${u.usedWithoutRecord}` };
+  };
+
+  const runParity = (tc) => {
+    const roles = mkRoles(tc.roles), entity = tc.entity || {};
+    if (tc.kind === 'eval') {
+      const got = evaluate(tc.block, tc.op, roles, tc.site, entity).final;
+      const rows = computeFieldCoverageRows(tc.block, tc.op, roles, tc.site, entity);
+      const maxRow = rows.reduce((m, r) => PERM_RANK[r.effective] > PERM_RANK[m] ? r.effective : m, 'X');
+      return { ok: got === tc.expected && maxRow === got, detail: `got ${got}, expected ${tc.expected}; MAX(rows)=${maxRow}` };
+    }
+    const got = frameworkWouldFail(tc.block, roles, tc.site, entity);
+    return { ok: got === tc.expected, detail: `fails=${got}, expected ${tc.expected}` };
+  };
+
   // ── Run all groups ──
   const groups = [
     runGroup('Core algorithm', tests, tc => {
@@ -2510,7 +2788,10 @@ function runTests() {
     }),
     runGroup('Field View — MAX(rows) == combined', invariantCases, runInvariant),
     runGroup('Advisor — raising reaches target', raiseCases, runRaise),
-    runGroup('Advisor — lowering reaches target', lowerCases, runLower)
+    runGroup('Advisor — lowering reaches target', lowerCases, runLower),
+    runGroup('UI effect — record access caps the field', uiCases, runUiEffect),
+    runGroup('Framework parity — role case, filtered * column', parityCases, runParity),
+    runGroup('Framework parity — which block is used', usageCases, runUsage)
   ];
   const tp = groups.reduce((s, g) => s + g.passed, 0);
   const tt = groups.reduce((s, g) => s + g.total, 0);
@@ -2709,6 +2990,15 @@ function renderMatrixBlock(block, sheetName, blockIdx) {
   const summary = document.createElement('summary');
   const title = document.createElement('span');
   title.innerHTML = escapeHtml(block.identifier) + (block.label ? `<span class="block-label">— ${escapeHtml(block.label)}</span>` : '');
+  const usageText = blockUsageText(parsed[sheetName] || [], blockIdx);
+  if (usageText) {
+    const u = blockUsage(parsed[sheetName], blockIdx);
+    const tag = document.createElement('span');
+    tag.className = 'block-label';
+    tag.textContent = u.ignored ? ' · ignored (replaced by a later block)' : u.usedOnForms ? ' · open records only' : ' · grids / API only';
+    tag.title = usageText;
+    title.appendChild(tag);
+  }
   summary.appendChild(title);
   const entityBadge = document.createElement('span');
   entityBadge.className = 'badge-counts';
@@ -2717,6 +3007,10 @@ function renderMatrixBlock(block, sheetName, blockIdx) {
   pill.textContent = entityPerm;
   pill.title = `Entity-level: ${PERM_NAME[entityPerm]} — can the user open this record at all? Click to see the full trace.`;
   pill.dataset.perm = entityPerm;
+  if (frameworkWouldFail(block, userRoles, siteLevelDefault, conds)) {
+    pill.textContent = entityPerm + ' ⚠';
+    pill.title = 'In the live system this record currently fails with an error for this user (the shared * rule is switched off by its properties — a known framework defect). Click to see why.';
+  }
   pill.addEventListener('click', e => {
     // Stop the <summary> from toggling open/closed when the pill is clicked.
     e.preventDefault();
@@ -2735,7 +3029,7 @@ function renderMatrixBlock(block, sheetName, blockIdx) {
   }
 
   if (opRows.length) {
-    bodyEl.appendChild(buildMatrixRowsTable(block, sheetName, blockIdx, opRows));
+    bodyEl.appendChild(buildMatrixRowsTable(block, sheetName, blockIdx, opRows, entityPerm));
   } else {
     const empty = document.createElement('div');
     empty.className = 'matrix-empty';
@@ -2778,7 +3072,7 @@ function buildMatrixConditionsRow(block, sheetName, blockIdx) {
   return row;
 }
 
-function buildMatrixRowsTable(block, sheetName, blockIdx, rows) {
+function buildMatrixRowsTable(block, sheetName, blockIdx, rows, entityPerm) {
   const grid = document.createElement('div');
   grid.className = 'matrix-rows';
   for (const r of rows) {
@@ -2796,6 +3090,18 @@ function buildMatrixRowsTable(block, sheetName, blockIdx, rows) {
     permCell.className = 'matrix-perm cell-' + r.finalPerm;
     permCell.textContent = r.finalPerm;
     permCell.title = `${PERM_NAME[r.finalPerm]} — click to see the full trace`;
+    // Only Entities fields are held back by their record (see recordLimitFor).
+    const limited = sheetName === 'Entities' ? fieldUiEffect(entityPerm, r.finalPerm).limitedByRecord : null;
+    if (limited) {
+      permCell.classList.add('capped');
+      const mark = document.createElement('span');
+      mark.className = 'cap-mark';
+      mark.textContent = '🔒';
+      permCell.appendChild(mark);
+      permCell.title = limited === 'readOnly'
+        ? `${PERM_NAME[r.finalPerm]} in the sheet — but read-only here: the record is only ${entityPerm} (${PERM_NAME[entityPerm]}). Click to see the full trace.`
+        : `${PERM_NAME[r.finalPerm]} in the sheet — but hidden here: the record is ${entityPerm} (${PERM_NAME[entityPerm]}), so the form doesn't open. Click to see the full trace.`;
+    }
     permCell.addEventListener('click', () => drillIntoMatrixCell(sheetName, blockIdx, r.operation));
     rowEl.appendChild(permCell);
 
@@ -2860,7 +3166,7 @@ function drillIntoMatrixCell(sheetName, blockIdx, operationName) {
   selectSheet(sheetName);
   const blockSel = $('block');
   if (blockSel) {
-    blockSel.value = block.identifier;
+    blockSel.value = String(blockIdx);
     selectBlock();
   }
   const opSel = $('operation');
@@ -2891,7 +3197,8 @@ function drillFieldToTrace() {
 }
 
 function buildMatrixCSV() {
-  const lines = [['Sheet', 'Block', 'BlockLabel', 'Operation', 'OperationLabel', 'EffectivePermission', 'PermissionName', 'ConditionsApplied']];
+  // LimitedByRecord is appended LAST so existing column positions don't move.
+  const lines = [['Sheet', 'Block', 'BlockLabel', 'Operation', 'OperationLabel', 'EffectivePermission', 'PermissionName', 'ConditionsApplied', 'LimitedByRecord']];
   for (const sheetName of ['Entities', 'Transactions', 'Tasks']) {
     if (!parsed[sheetName]) continue;
     parsed[sheetName].forEach((block, idx) => {
@@ -2900,8 +3207,12 @@ function buildMatrixCSV() {
         ? Object.entries(conds).map(([k, v]) => `${k}=${v}`).join(';')
         : '';
       const rows = evaluateBlockRows(block, conds);
+      const entityPerm = rows[0].finalPerm; // first row is always entity-level
       for (const r of rows) {
-        lines.push([sheetName, block.identifier, block.label || '', r.operation, r.label, r.finalPerm, PERM_NAME[r.finalPerm], condStr]);
+        const limited = sheetName === 'Entities' && !r.isEntity ? fieldUiEffect(entityPerm, r.finalPerm).limitedByRecord : null;
+        const limitStr = limited === 'readOnly' ? `read-only: record is ${entityPerm}`
+          : limited === 'blocked' ? `hidden: record is ${entityPerm}` : '';
+        lines.push([sheetName, block.identifier, block.label || '', r.operation, r.label, r.finalPerm, PERM_NAME[r.finalPerm], condStr, limitStr]);
       }
     });
   }
@@ -2939,7 +3250,9 @@ function runFieldCoverage() {
   const rows       = computeFieldCoverageRows(currentBlock, opName, userRoles, siteLevelDefault, entityState);
   // The actual permission the system computes for this multi-role user (MAX across roles).
   const combined   = userRoles.length ? evaluate(currentBlock, opName, userRoles, siteLevelDefault, entityState) : null;
-  renderFieldMode(currentBlock, opName, rows, targetPerm, combined);
+  // The record's own access, which caps what this field can actually do on screen.
+  const lim        = userRoles.length ? recordLimitFor(currentSheet, currentBlock, opName, userRoles, siteLevelDefault, entityState) : null;
+  renderFieldMode(currentBlock, opName, rows, targetPerm, combined, lim);
 }
 
 function computeFieldCoverageRows(block, operationName, roles, siteLevel, entityState) {
@@ -2947,7 +3260,7 @@ function computeFieldCoverageRows(block, operationName, roles, siteLevel, entity
   const seen = new Map();
   for (const r of roles) {
     if (!r.name) continue;
-    seen.set(r.name, r.defaultPermission);
+    seen.set(roleNameIn(block, r.name), r.defaultPermission); // same case-insensitive match as evaluate()
   }
 
   // Which roles in this set own a matched (non-*) column? If ANY do, evaluate() consumes the
@@ -3272,7 +3585,7 @@ function fieldLowerLever(block, operationName, row, targetPerm, hasColumnHolder)
   return dbLever;
 }
 
-function renderFieldMode(block, operationName, rows, targetPerm, combined) {
+function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) {
   const host = $('fieldOutput');
   host.innerHTML = '';
 
@@ -3297,6 +3610,10 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
       `</button>` +
       (rows.length > 1 ? `<span style="color:var(--muted);">— the most permissive of their ${rows.length} roles</span>` : '') +
       `</div>`;
+    if (frameworkWouldFail(block, userRoles, siteLevelDefault, entityState)) summary.insertAdjacentHTML('beforeend', `<div class="record-limit">${FRAMEWORK_FAIL_TEXT}</div>`);
+    const limitHtml = recordLimitText(lim);
+    if (limitHtml) summary.insertAdjacentHTML('beforeend', `<div class="record-limit">${limitHtml}</div>`);
+    if (lim) summary.insertAdjacentHTML('beforeend', `<div class="rbs-only-note">${RBS_ONLY_NOTE}</div>`);
     host.appendChild(summary);
     summary.querySelector('.fc-summary-link').addEventListener('click', drillFieldToTrace);
     const fh = dismissibleHint('fieldDrill', `💡 Click the result to open the full step-by-step explanation in <strong>Trace</strong>.`);
@@ -3431,12 +3748,37 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined) {
 
   const fieldLabelText = operationName ? `“${escapeHtml(operationName)}”` : `this record`;
 
+  // The record itself must allow what the target asks for: editing a field needs the record at
+  // Modify or higher, seeing it needs Read or higher. If it doesn't, no change to this field's
+  // cells will be enough on its own — say so up front and offer the record-level view.
+  // (Display only: the levers below still describe the field's spreadsheet value exactly.)
+  const recordNeed  = lim && tRank >= PERM_RANK.R ? (tRank >= PERM_RANK.M ? 'M' : 'R') : null;
+  const recordShort = !!recordNeed && PERM_RANK[lim.entityPerm] < PERM_RANK[recordNeed];
+  if (recordShort) {
+    const note = document.createElement('div');
+    note.className = 'record-limit';
+    note.style.marginBottom = '10px';
+    note.innerHTML =
+      `<strong>The record holds this field back.</strong> Even at <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong> on ${fieldLabelText}, ` +
+      `the record itself is only <strong>${lim.entityPerm} — ${PERM_NAME[lim.entityPerm]}</strong> for this user, so the field stays ${recordNeed === 'M' ? 'read-only' : 'hidden'}. ` +
+      `The record also needs <strong>${recordNeed} — ${PERM_NAME[recordNeed]}</strong> or higher. ` +
+      `<button type="button" class="matrix-link-btn fc-record-link">Show how to raise the record</button>`;
+    note.querySelector('.fc-record-link').addEventListener('click', () => {
+      $('operation').value = '';
+      $('targetPerm').value = recordNeed;
+      runFieldCoverage();
+    });
+    advisor.appendChild(note);
+  }
+
   // On target exactly → done.
   if (cRank === tRank) {
     const p = document.createElement('p');
     p.className = 'advisor-intro';
-    p.style.color = '#059669';
-    p.innerHTML = `This user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}. Nothing to change.`;
+    p.style.color = recordShort ? '' : '#059669';
+    p.innerHTML = recordShort
+      ? `In the spreadsheet this user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, so nothing on this field needs changing — the change needed is on the record (see above).`
+      : `This user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}. Nothing to change.`;
     advisor.appendChild(p);
     host.appendChild(advisor);
     return;
