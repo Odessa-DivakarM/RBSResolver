@@ -264,7 +264,7 @@ or `Modify`, so for fields and actions `F` and `M` behave identically.
 | Entity-level | Effect                                                                  |
 | ------------ | ----------------------------------------------------------------------- |
 | `F` / `M`    | Record editable; each field/action then limited by its own value (§7.1) |
-| `R`          | Record read-only — every field and action disabled                      |
+| `R`          | Record read-only — fields read-only, action buttons hidden              |
 | `N` / `X`    | Entity not visible (every field hidden); grids show no columns; entity API read denied |
 
 Whether a form can be opened from a menu or command is mostly decided by the
@@ -307,6 +307,19 @@ field-level result, never one role column's values.
 | `F` / `M`    | editable              | visible, read-only    | hidden          |
 | `R`          | **visible, read-only** | visible, read-only    | hidden          |
 | `N` / `X`    | hidden                | hidden                | hidden          |
+
+**Actions** follow the same table, but an action button that cannot be used is
+normally **hidden**, not greyed out: `ActionWidgetHtmlElementProperties.IsVisible
+= IsParentVisible && IsEnabled`. So "visible, read-only" means *hidden* for an
+action. One exception: in the Modern UI (`UserSession.IsModernized`) a form
+action whose **own row** is below `Modify` while the record is editable can show
+greyed out after the form's properties refresh
+(`CanActionWidgetDisplayedAsVisibleAndDisabled` → `AnyActionsDisabledAndVisible`;
+`prepareActionWidget` in `framework.uicontrols.js`). When the **record** is
+below `Modify` the whole form model is read-only
+(`AbstractEntryFormModel.IsReadOnly`), and every action helper returns false at
+`IsModelReadOnly`, so its action buttons are hidden in every UI. Grid buttons
+are always hidden when disabled.
 
 Example (FRWK-25772): Permissions row `X`, role default `X`, site-level `R` → entity
 `R`; field row `F` → field value `F`, but the field is **read-only**. The visualizer
@@ -398,17 +411,24 @@ value (`R` → read-only rows; `N` / `X` → the grid shows no columns).
 **Custom grid buttons are not child-list buttons.** A form can add its own
 buttons to a list (`EditCollection.ActionBar` → `GridAction` →
 `PerformAction`) — e.g. the Asset form hides Remove (`ShowRemoveAction="False"`)
-and shows *Delete* = `DeactivateAssetFeatures` instead. Such a button is gated
-only by the entity that owns the action (the form's entity, or the one on the
-`PerformAction.Property` path) and that action's row (§7.1), plus its XAML
-`Visible` and the form model not being read-only
-(`GridActionWidgetHtmlElementProperties.IsAccessible` →
-`AnyActionsVisibleAndEnabled`). The child entity's permission is **not**
-checked: with `AssetFeature` at `R`, Add is hidden but Delete is still shown and enabled. To
-block it, lower that action's row. The visualizer treats these rows as ordinary
-parent actions — nothing in the workbook ties an action like
-`DeactivateAssetFeatures` to the child (only its parameter type in the
-behaviour does), and guessing from the name would mislabel custom actions.
+and shows *Delete* = `DeactivateAssetFeatures` instead. Permission-wise, such a
+`PerformAction` / `OpenActionForm` button is gated only by the entity that owns
+the action — the form's entity, or the one on the `PerformAction.Property` path,
+**not necessarily the list's parent** (in `CollateralAssetDialog` the list is
+`Asset.AssetFeatures` but `DeactivateAssetFeatures` belongs to `CollateralAsset`)
+— and that action's row (§7.1), plus its XAML `Visible` and the form model not
+being read-only (`GridActionWidgetHtmlElementProperties.IsAccessible` →
+`AnyActionsVisibleAndEnabled`). The usual non-RBS gates still apply (panel
+visibility, behaviour `Enabled` / `Visible`). A grid button that runs a
+`Command` is gated by the Transactions sheet (`Command.IsAccessible`), one that
+runs an `ExecuteTransactionAction` by the transaction's `Modify`. The child
+entity's permission is **not** checked: with `AssetFeature` at `R`, Add is
+hidden but Delete is still shown and enabled. To block it, lower that action's
+row on the entity that owns it. The visualizer treats these rows as ordinary
+actions — nothing in the workbook ties an action like `DeactivateAssetFeatures`
+to the child (only its parameter type in the behaviour and the form's
+`SelectionParamFields` do), and guessing from the name would mislabel custom
+actions.
 
 **How the visualizer detects it.** A row is treated as a child-list button only
 when the block has **both** `Create<X>` and `Remove<X>` rows, the Entities
@@ -453,8 +473,11 @@ Not flagged by the visualizer:
   whose parent also has an unrelated `Has<X>` row (for example a reference
   named `X`): it would be read as one-to-one and its child check dropped. Not
   seen in the measured workbook.
-- A grandchild collection bound on the root form, whose Create button is
-  disabled outright (`GridActionWidgetHtmlElementProperties.IsEnabled`).
+- A grandchild collection bound on the root form (the binding entity is not
+  the grandchild's parent): its Create button is hidden outright, and its
+  Remove button skips the parent's `Remove<Child>` row — only the child's
+  `Modify`, `ShowRemoveAction` and the form not being read-only still apply
+  (`GridActionWidgetHtmlElementProperties.IsEnabled`, `return !isCreateAction`).
 - Script-driven child edits (`ManipulationContext`), which check only the
   parent's `Create<Child>` action.
 

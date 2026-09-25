@@ -697,7 +697,7 @@ const UX_EFFECT = {
   Entities: {
     F: 'Record is editable: fields and actions can be used, each still limited by its own row.',
     M: 'Record is editable: fields and actions can be used, each still limited by its own row. (On screen, Modify and Full behave the same.)',
-    R: 'Record is read-only: every field and action is disabled.',
+    R: 'Record is read-only: its fields are read-only and its action buttons are hidden.',
     N: 'Record not shown: its fields are hidden and grids show no columns.',
     X: 'No rule gives a value; treated as None &mdash; nothing is shown.'
   },
@@ -2021,8 +2021,14 @@ function buildFinalCard(t, lim) {
     effectHtml = lim.effect.editable ? `The ${btn} button on the ${cn} list is shown.` : `The ${btn} button on the ${cn} list isn't shown.`;
   } else if (lim) {
     const fx = lim.effect;
+    // A read-only record makes the whole form read-only, which hides its action buttons in every UI. When
+    // only the row is below Modify, the Modern UI may show the button greyed out after the form refreshes
+    // (ActionWidgetHtmlElementProperties.CanActionWidgetDisplayedAsVisibleAndDisabled).
+    const recordReadOnly = PERM_RANK[normCode(lim.entityPerm)] < PERM_RANK.M;
     effectHtml = fx.editable ? 'As a field: editable. As an action: can be used.'
-      : fx.visible ? 'As a field: visible but read-only. As an action: not shown (action buttons appear only when they can be used).'
+      : fx.visible ? (recordReadOnly
+        ? 'As a field: visible but read-only. As an action: hidden.'
+        : "As a field: visible but read-only. As an action: can't be used &mdash; hidden, or greyed out in the Modern UI.")
       : 'Not shown, whether this is a field or an action.';
   }
   const card = document.createElement('div');
@@ -2927,9 +2933,10 @@ function runTests() {
     { name: 'parent R, child R → held back by both', parent: CL('R', 'F', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: true, byRecord: 'readOnly', childPerm: 'R' } },
     { name: 'Create row itself R → not "held back" (the row already says no)', parent: CL('M', 'R', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'R', exp: { shown: false, byChild: false, byRecord: null, childPerm: 'R' } },
     { name: 'Create row R, child F → Add not shown: the row decides, a Full child cannot lift it', parent: CL('M', 'R', 'F'), blocks: [CH('F')], op: 'CreateAssetFeature', expEval: 'R', exp: { shown: false, byChild: false, byRecord: null, childPerm: 'F' } },
-    // A custom grid button (AssetForm's Delete = PerformAction DeactivateAssetFeatures) is gated only by the parent's
-    // record and its own row (GridActionWidgetHtmlElementProperties.IsAccessible) — never by the child entity.
-    { name: 'custom Delete action (DeactivateAssetFeatures) with child R → not a child-list button, still shown', parent: CL('M', 'F', 'F', [{ name: 'DeactivateAssetFeatures', values: ['F'] }, { name: 'HasAssetFeatures', values: ['F'] }, { name: 'HasNewAssetFeatures', values: ['F'] }]), blocks: [CH('R')], op: 'DeactivateAssetFeatures', expEval: 'F', exp: { notChild: true, shown: true } },
+    // A custom grid button (AssetForm's Delete = PerformAction DeactivateAssetFeatures) is gated by the record and row
+    // of the entity that owns the action (GridActionWidgetHtmlElementProperties.IsAccessible) — never by the child
+    // entity. The app cannot see that link, so it must not guess one from the name.
+    { name: 'an action not named Create/Remove<X> (DeactivateAssetFeatures) is never a child-list button, whatever level the child has', parent: CL('M', 'F', 'F', [{ name: 'DeactivateAssetFeatures', values: ['F'] }, { name: 'HasAssetFeatures', values: ['F'] }, { name: 'HasNewAssetFeatures', values: ['F'] }]), blocks: [CH('R')], op: 'DeactivateAssetFeatures', expEval: 'F', exp: { notChild: true, shown: true } },
     { name: 'no Remove row → not treated as a child-list action', parent: CL('M', 'F', null), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'F', exp: { notChild: true, shown: true } },
     { name: 'no child block in the sheet → not treated as a child-list action', parent: CL('M', 'F', 'F'), blocks: [], op: 'CreateAssetFeature', expEval: 'F', exp: { notChild: true, shown: true } },
     { name: 'ordinary field row → unaffected', parent: CL('M', 'F', 'F'), blocks: [CH('R')], op: 'Fld', expEval: 'F', exp: { notChild: true, shown: true } },
@@ -2994,7 +3001,8 @@ function runTests() {
     const cell = buildMatrixRowsTable(parent, 'Entities', 0, [{ operation: 'CreateAssetFeature', label: '', finalPerm: t.final }], entityPerm, sheetBlocks, roles, 'R').querySelector('.matrix-perm');
     const els = [card.querySelector('.final-badge'), chipHost.firstElementChild, cell];
     const ux = card.querySelector('.ux').textContent;
-    const ok = t.final === 'R' && els.every(el => !el.classList.contains('capped')) && ux.includes("isn't shown");
+    const ok = t.final === 'R' && els.every(el => !el.classList.contains('capped')) && ux.includes("Add button") && ux.includes("isn't shown")
+      && !card.querySelector('.record-limit');
     return { ok, detail: `evaluate=${t.final}, marked=${els.map(el => el.classList.contains('capped')).join('/')}, ux="${ux}"` };
   };
   childCases.push({ name: 'Create row R, child F → no held-back marker in any view, Trace says Add isn\'t shown', custom: childNoMarkerCase });
