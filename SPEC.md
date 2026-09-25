@@ -369,11 +369,11 @@ Its `Create<Child>` / `Remove<Child>` are ordinary parent actions, gated only by
 §7.1 (parent entity and row cover `Modify`); the child's own permission is not
 checked.
 
-A `OneToOneMandatory` child has no list either, and no actions at all: the child
-always exists with its parent, so `Behavior.RegisterDefaultChildActions` adds
-`Create<Child>` / `Remove<Child>` only for `OneToMany` and `OneToOneOptional`,
-and `AbstractBehavior` adds no `Has…` condition for it. Its parent's block has
-none of these rows, so there is nothing to gate.
+A `OneToOneMandatory` child has no list either, and no actions at all:
+`Behavior.RegisterDefaultChildActions` adds `Create<Child>` / `Remove<Child>`
+only for `OneToMany` and `OneToOneOptional`, `AbstractBehavior` adds no `Has…`
+condition for it, and `AbstractEntity.RemoveChildEntity` refuses to remove it.
+Its parent's block has none of these rows, so there is nothing to gate.
 
 | Relation | Implicit actions | Implicit conditions | List (Add / Remove buttons) |
 |---|---|---|---|
