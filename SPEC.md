@@ -359,8 +359,18 @@ the parent's behaviour gets two implicit actions, `Create<Child>` and
 an explicitly declared action of the same name takes its place). Both appear as
 operation rows in the parent's block.
 
-The child list's (`EditCollection`) Add / Remove buttons are shown only when
-**all** hold:
+**Only a `OneToMany` child has a list.** An `EditCollection` can bind only a
+`OneToMany` child collection (or an editable object-set query) —
+`PropertyParser.EditCollectionFlags = ChildrenOneToMany | EditableObjectSetQuery`;
+for any other property the parser throws `MetamodelException`
+(`PropertyParser.ParseEditableCollection`). A `OneToOneOptional` child is a
+single object member, so it never has a list, an Add button or a Remove button.
+Its `Create<Child>` / `Remove<Child>` are ordinary parent actions, gated only by
+§7.1 (parent entity and row cover `Modify`); the child's own permission is not
+checked.
+
+A `OneToMany` child list's (`EditCollection`) Add / Remove buttons are shown
+only when **all** hold:
 
 | # | Check | Source |
 |---|---|---|
@@ -374,12 +384,32 @@ away, never grant it. Existing child rows follow the child's own entity-level
 value (`R` → read-only rows; `N` / `X` → the grid shows no columns).
 
 **How the visualizer detects it.** A row is treated as a child-list button only
-when the block has **both** `Create<X>` and `Remove<X>` rows and the Entities
-sheet has a block named `X` (`childListAction`). Hand-written actions that
-merely start with `Create` are therefore not mistaken for one: in the base
-framework (checked in `Lw.Domain.Base`; product layers not checked), every explicit `Create<X>` action whose `X` is an entity creates a
-record that is *not* a child of the owning entity, and the only explicit
-`Create<X>`/`Remove<X>` pairs are `Category = Helper` (never in the workbook).
+when the block has **both** `Create<X>` and `Remove<X>` rows, the Entities
+sheet has a block named `X`, and `X` is not a one-to-one child
+(`childListAction`):
+
+- *Custom actions.* Hand-written actions that merely start with `Create` are not
+  mistaken for one: in the base framework every explicit `Create<X>` action
+  whose `X` is an entity creates a record that is *not* a child of the owning
+  entity, and the only explicit `Create<X>`/`Remove<X>` pairs are
+  `Category = Helper` (never in the workbook).
+- *One-to-one vs one-to-many* (`isOneToOneChild`). The workbook does not store
+  the relation, but the implicit conditions differ
+  (`AbstractBehavior.AddChildExistsConditions`; member name from
+  `Helper.MemberName`): `OneToMany` → `Has<Plural>` and `HasNew<Plural>`;
+  `OneToOneOptional` → `Has<X>` only. `X` is one-to-one when the block has
+  `Has<X>` and no `HasNew<plural of X>`. Plurals come from
+  `Pluralizer.Pluralize` (an English pluralization service); `pluralForms`
+  covers the regular forms (`s`, `es`, consonant+`y` → `ies`, `f`/`fe` → `ves`,
+  `is` → `es`) plus `Person` / `Child`. Without the `Has…` rows the child is
+  treated as `OneToMany`.
+
+Measured on a production workbook (3,066 entity blocks) against the entity
+models of `Odessa.Framework` and `Odessa.Framework.Core`: of 1,427 detected
+pairs, 1,401 could be checked — all are real parent → child relations (0 false
+positives, 0 real children missed), and the one-to-one rule classifies all 92
+`OneToOneOptional` and all 1,309 `OneToMany` children correctly. The other 26
+pairs involve entities from a layer outside those two repositories.
 The child's value is computed as the framework looks it up — its block without
 conditions, else `MAX(role defaults)` (`childEntityLevel`) — and the result is
 shown with the same 🔒 marker as §7.1 in all three views and in the CSV
@@ -390,9 +420,10 @@ Not flagged by the visualizer:
 - A child that is missing from the workbook (the framework then uses role
   defaults — usually `Full`). Without a block the pair alone is not treated as
   proof of a child list.
-- `OneToOneOptional` children, which get the same action pair but are not
-  necessarily shown as a list; the workbook does not say which relation a child
-  has, so they are treated like lists.
+- A one-to-many child whose irregular plural is outside `pluralForms` **and**
+  whose parent also has an unrelated `Has<X>` row (for example a reference
+  named `X`): it would be read as one-to-one and its child check dropped. Not
+  seen in the measured workbook.
 - A grandchild collection bound on the root form, whose Create button is
   disabled outright (`GridActionWidgetHtmlElementProperties.IsEnabled`).
 - Script-driven child edits (`ManipulationContext`), which check only the

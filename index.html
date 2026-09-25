@@ -739,9 +739,9 @@ function fieldUiEffect(entityPerm, fieldPerm) {
 // Record-vs-field combination for a selected field. Only Entities-sheet fields are gated by
 // their record this way; Transactions and Tasks have no field layer, and the record level
 // itself (no field) has nothing to combine — those return null.
-// Child-list Add / Remove buttons. For every OneToMany / OneToOneOptional child the framework registers
-// the actions Create<Child> and Remove<Child> on the parent (Behavior.RegisterDefaultChildActions). The
-// grid's Add / Remove buttons also need the CHILD entity itself to cover Modify
+// Child-list Add / Remove buttons. For every OneToMany (and OneToOneOptional) child the framework registers
+// the actions Create<Child> and Remove<Child> on the parent (Behavior.RegisterDefaultChildActions). Only a
+// OneToMany child has a list (see isOneToOneChild); its Add / Remove buttons also need the CHILD entity itself to cover Modify
 // (GridPanelHelper.IsCreateActionAllowed / IsRemoveActionAllowed) — a lookup without a record, so it uses
 // the child's block without conditions, else the highest default access level among the user's roles.
 // Detected only from the pair (Create<X> AND Remove<X> rows in this block) plus an Entities block named X,
@@ -752,7 +752,30 @@ function childListAction(sheetBlocks, block, operationName) {
   const child = m[2], other = (m[1] === 'Create' ? 'Remove' : 'Create') + child;
   if (!block.operations.some(o => o.name === other)) return null;
   if (!sheetBlocks.some(b => b !== block && b.identifier === child)) return null;
+  if (isOneToOneChild(block, child)) return null; // no list → an ordinary parent action (field rule only)
   return { kind: m[1], child };
+}
+
+// A OneToOneOptional child also gets Create<X> / Remove<X>, but never a list: an EditCollection can bind
+// only a OneToMany child (PropertyParser.EditCollectionFlags = ChildrenOneToMany | EditableObjectSetQuery),
+// so there is no Add / Remove button and the child's own permission is not checked. The implicit conditions
+// tell the two apart (AbstractBehavior.AddChildExistsConditions): OneToMany → Has<Plural> + HasNew<Plural>,
+// OneToOneOptional → Has<X> only. Plurals follow Pluralizer.Pluralize; the forms below cover the common
+// rules. When the rows are missing the child is treated as OneToMany (the child check still applies).
+function pluralForms(x) {
+  const f = new Set([x, x + 's', x + 'es']);
+  if (/[^aeiou]y$/i.test(x)) f.add(x.slice(0, -1) + 'ies');
+  if (/fe$/.test(x)) f.add(x.slice(0, -2) + 'ves'); else if (/f$/.test(x)) f.add(x.slice(0, -1) + 'ves');
+  if (/is$/.test(x)) f.add(x.slice(0, -2) + 'es');
+  if (/Person$/.test(x)) f.add(x.slice(0, -6) + 'People');
+  if (/Child$/.test(x)) f.add(x + 'ren');
+  return f;
+}
+function isOneToOneChild(block, x) {
+  const ops = new Set(block.operations.map(o => o.name));
+  if (!ops.has('Has' + x)) return false;
+  for (const p of pluralForms(x)) if (ops.has('HasNew' + p)) return false;
+  return true;
 }
 function childEntityLevel(sheetBlocks, childName, roles, siteLevel) {
   let staticBlock = null;
@@ -2926,6 +2949,21 @@ function runTests() {
       && lim.child.perm === tc.exp.childPerm && (!tc.exp.source || lim.child.source === tc.exp.source);
     return { ok, detail: `evaluate=${ev}, shown=${e.editable}, byChild=${!!e.limitedByChild}, byRecord=${e.limitedByRecord}, child=${lim.child && lim.child.perm} (${lim.child && lim.child.source})` };
   };
+  // One-to-one optional children have no list (an EditCollection can bind only a OneToMany child), so their
+  // Create<X> / Remove<X> are ordinary parent actions: only the parent's record and row count. Told apart by
+  // the implicit conditions: OneToMany → Has<Plural> + HasNew<Plural>; OneToOneOptional → Has<X> only.
+  const OO = (extraOps) => makeBlock('Party', '', ['Role A'], ['M'], [
+    { name: 'CreateCustomer', values: ['F'] }, { name: 'RemoveCustomer', values: ['F'] }, ...extraOps]);
+  const CU = (perm) => makeBlock('Customer', '', ['Role A'], [perm], []);
+  const hasRow = (n) => ({ name: n, values: ['R'] });
+  childCases.push(
+    { name: 'one-to-one child (Has<X>, no HasNew) → no list, child not checked → shown', parent: OO([hasRow('HasCustomer')]), blocks: [CU('R')], op: 'CreateCustomer', expEval: 'F', exp: { notChild: true, shown: true } },
+    { name: 'one-to-one child, parent R → held back by the parent record only', parent: makeBlock('Party', '', ['Role A'], ['R'], [{ name: 'CreateCustomer', values: ['F'] }, { name: 'RemoveCustomer', values: ['F'] }, hasRow('HasCustomer')]), blocks: [CU('R')], op: 'CreateCustomer', expEval: 'F', exp: { notChild: true, shown: false } },
+    { name: 'one-to-one with an unrelated HasNew<X…> row (HasNewCustomerDynamicFields) → still one-to-one', parent: OO([hasRow('HasCustomer'), hasRow('HasNewCustomerDynamicFields')]), blocks: [CU('R')], op: 'CreateCustomer', expEval: 'F', exp: { notChild: true, shown: true } },
+    { name: 'one-to-many whose plural equals its name (Has<X> + HasNew<X>) → child checked', parent: OO([hasRow('HasCustomer'), hasRow('HasNewCustomer')]), blocks: [CU('R')], op: 'CreateCustomer', expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R' } },
+    { name: 'one-to-many + a reference also named X (Has<X> + HasNew<X>s) → child checked', parent: OO([hasRow('HasCustomer'), hasRow('HasNewCustomers')]), blocks: [CU('R')], op: 'CreateCustomer', expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R' } },
+    { name: 'one-to-many, y → ies plural (HasNewAssetCategories) → child checked', parent: makeBlock('Asset', '', ['Role A'], ['M'], [{ name: 'CreateAssetCategory', values: ['F'] }, { name: 'RemoveAssetCategory', values: ['F'] }, hasRow('HasAssetCategory'), hasRow('HasNewAssetCategories')]), blocks: [makeBlock('AssetCategory', '', ['Role A'], ['R'], [])], op: 'CreateAssetCategory', expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R' } }
+  );
   // The held-back marker also appears for a child-list button, in all three views.
   const childMarkerCase = () => {
     const roles = mkRoles([['Role A', 'X']]), parent = CL('M', 'F', 'F'), sheetBlocks = [parent, CH('R')];
