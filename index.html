@@ -739,25 +739,84 @@ function fieldUiEffect(entityPerm, fieldPerm) {
 // Record-vs-field combination for a selected field. Only Entities-sheet fields are gated by
 // their record this way; Transactions and Tasks have no field layer, and the record level
 // itself (no field) has nothing to combine — those return null.
-function recordLimitFor(sheet, block, operationName, roles, siteLevel, entityState) {
+// Child-list Add / Remove buttons. For every OneToMany / OneToOneOptional child the framework registers
+// the actions Create<Child> and Remove<Child> on the parent (Behavior.RegisterDefaultChildActions). The
+// grid's Add / Remove buttons also need the CHILD entity itself to cover Modify
+// (GridPanelHelper.IsCreateActionAllowed / IsRemoveActionAllowed) — a lookup without a record, so it uses
+// the child's block without conditions, else the highest default access level among the user's roles.
+// Detected only from the pair (Create<X> AND Remove<X> rows in this block) plus an Entities block named X,
+// so an ordinary action that merely starts with "Create" is never mistaken for one.
+function childListAction(sheetBlocks, block, operationName) {
+  const m = /^(Create|Remove)(.+)$/.exec(operationName || '');
+  if (!m || !block || !sheetBlocks) return null;
+  const child = m[2], other = (m[1] === 'Create' ? 'Remove' : 'Create') + child;
+  if (!block.operations.some(o => o.name === other)) return null;
+  if (!sheetBlocks.some(b => b !== block && b.identifier === child)) return null;
+  return { kind: m[1], child };
+}
+function childEntityLevel(sheetBlocks, childName, roles, siteLevel) {
+  let staticBlock = null;
+  for (const b of sheetBlocks) if (b.identifier === childName && !(b.conditions && b.conditions.length)) staticBlock = b; // last one wins
+  if (staticBlock) return { perm: evaluate(staticBlock, null, roles, siteLevel, {}).final, source: 'block' };
+  // No block without conditions → UserPermissionCache.DefaultPermissionResult = MAX(role defaults).
+  const site = normCode(siteLevel || 'F');
+  const perm = maxPerm(...roles.filter(r => r.name).map(r => { const p = normCode(r.defaultPermission); return p === 'X' ? site : p; }));
+  return { perm, source: 'roleDefaults' };
+}
+function childInfoFor(sheetBlocks, block, operationName, roles, siteLevel) {
+  const cl = childListAction(sheetBlocks, block, operationName);
+  if (!cl) return null;
+  const c = childEntityLevel(sheetBlocks, cl.child, roles, siteLevel);
+  return { name: cl.child, kind: cl.kind, perm: c.perm, source: c.source };
+}
+
+// Combine the record, the row and (for a child-list button) the child record. "Held back" means the row
+// itself allows more than the user gets on screen.
+function combineLimit(entityPerm, fieldPerm, child) {
+  const base = fieldUiEffect(entityPerm, fieldPerm);
+  if (!child) return { entityPerm, fieldPerm, child: null, effect: base };
+  const shown = base.editable && PERM_RANK[child.perm] >= PERM_RANK.M; // a button is visible only when enabled
+  const limitedByChild = PERM_RANK[child.perm] < PERM_RANK.M && PERM_RANK[normCode(fieldPerm)] >= PERM_RANK.M;
+  return { entityPerm, fieldPerm, child, effect: { visible: shown, editable: shown, limitedByRecord: base.limitedByRecord, limitedByChild } };
+}
+
+// Record-vs-field combination for a selected field. Only Entities-sheet fields are gated by
+// their record this way; Transactions and Tasks have no field layer, and the record level
+// itself (no field) has nothing to combine — those return null.
+function recordLimitFor(sheet, block, operationName, roles, siteLevel, entityState, sheetBlocks) {
   if (sheet !== 'Entities' || !operationName || !block) return null;
+  const blocks = sheetBlocks || (parsed && parsed.Entities) || [];
   const entityPerm = evaluate(block, null, roles, siteLevel, entityState).final;
   const fieldPerm  = evaluate(block, operationName, roles, siteLevel, entityState).final;
-  return { entityPerm, fieldPerm, effect: fieldUiEffect(entityPerm, fieldPerm) };
+  return combineLimit(entityPerm, fieldPerm, childInfoFor(blocks, block, operationName, roles, siteLevel));
 }
+function isHeldBack(lim) {
+  return !!(lim && (lim.effect.limitedByRecord || lim.effect.limitedByChild));
+}
+const buttonWord = (child) => child.kind === 'Create' ? 'Add' : 'Remove';
 
-// Plain-language explanation when the record holds a field back; '' when it doesn't.
+// Plain-language explanation when the row is held back; '' when it isn't.
 function recordLimitText(lim) {
-  if (!lim || !lim.effect.limitedByRecord) return '';
+  if (!isHeldBack(lim)) return '';
   const f = `<strong>${lim.fieldPerm} — ${PERM_NAME[lim.fieldPerm]}</strong>`;
   const e = `<strong>${lim.entityPerm} — ${PERM_NAME[lim.entityPerm]}</strong>`;
+  const parts = [];
   if (lim.effect.limitedByRecord === 'readOnly') {
-    return `This field allows ${f}, but the record itself is only ${e} for this user, so the field (or action) stays <strong>read-only</strong>. To make it editable, give the record Modify or higher.`;
+    parts.push(`This field allows ${f}, but the record itself is only ${e} for this user, so the field (or action) stays <strong>read-only</strong>. To make it editable, give the record Modify or higher.`);
+  } else if (lim.effect.limitedByRecord === 'blocked') {
+    parts.push(`This field allows ${f}, but the record itself is ${e} for this user, so this field isn't shown. The record needs Read or higher first.`);
   }
-  return `This field allows ${f}, but the record itself is ${e} for this user, so this field isn't shown. The record needs Read or higher first.`;
+  if (lim.effect.limitedByChild) {
+    const c = lim.child, cn = escapeHtml(c.name), btn = buttonWord(c);
+    const cp = `<strong>${c.perm} — ${PERM_NAME[c.perm]}</strong>`;
+    const why = c.source === 'roleDefaults'
+      ? ` (${cn} has no block without conditions in the sheet, so the system uses the highest default access level among the user's roles.)` : '';
+    parts.push(`This is the <strong>${btn}</strong> button of the ${cn} list. The row allows ${f}, but ${cn} itself is only ${cp} for this user, so the ${btn} button isn't shown. Give ${cn} Modify or higher.${why}`);
+  }
+  return parts.join('<br><br>');
 }
 
-// Marker + tooltip for a field its record holds back — one wording for Role Matrix, Trace and Field View.
+// Marker + tooltip for a held-back row — one wording for Role Matrix, Trace and Field View.
 const CAP_MARK_HTML = '<span class="cap-mark" aria-hidden="true">🔒</span>';
 function capTitle(limited, fieldPerm, entityPerm) {
   const e = `${entityPerm} (${PERM_NAME[entityPerm]})`;
@@ -765,11 +824,19 @@ function capTitle(limited, fieldPerm, entityPerm) {
     ? `${PERM_NAME[fieldPerm]} in the sheet — but read-only here: the record is only ${e}.`
     : `${PERM_NAME[fieldPerm]} in the sheet — but hidden here: the record is ${e}, so this field isn't shown.`;
 }
-// Field View's result chip ("F — Full"), marked when the record holds the field back.
+function heldBackTitle(lim) {
+  const parts = [];
+  if (lim.effect.limitedByRecord) parts.push(capTitle(lim.effect.limitedByRecord, lim.fieldPerm, lim.entityPerm));
+  if (lim.effect.limitedByChild) {
+    const c = lim.child;
+    parts.push(`${PERM_NAME[lim.fieldPerm]} in the sheet — but the ${buttonWord(c)} button isn't shown: ${c.name} itself is only ${c.perm} (${PERM_NAME[c.perm]}).`);
+  }
+  return parts.join(' ');
+}
+// Field View's result chip ("F — Full"), marked when the row is held back.
 function resultChipHtml(perm, lim) {
-  const limited = lim && lim.effect.limitedByRecord;
-  if (!limited) return `<span class="perm-chip cell-${perm}">${perm} — ${PERM_NAME[perm]}</span>`;
-  const title = escapeHtml(capTitle(limited, lim.fieldPerm, lim.entityPerm) + ' Click to see the full trace.');
+  if (!isHeldBack(lim)) return `<span class="perm-chip cell-${perm}">${perm} — ${PERM_NAME[perm]}</span>`;
+  const title = escapeHtml(heldBackTitle(lim) + ' Click to see the full trace.');
   return `<span class="perm-chip cell-${perm} capped" title="${title}">${perm} — ${PERM_NAME[perm]}${CAP_MARK_HTML}</span>`;
 }
 
@@ -1926,7 +1993,10 @@ function buildFinalCard(t, lim) {
   const limitHtml = recordLimitText(lim);
   // The badge stays the true spreadsheet value; the effect line reflects what the screen allows.
   let effectHtml = uxEffect(currentSheet, t.final);
-  if (lim) {
+  if (lim && lim.child) {
+    const btn = buttonWord(lim.child), cn = escapeHtml(lim.child.name);
+    effectHtml = lim.effect.editable ? `The ${btn} button on the ${cn} list is shown.` : `The ${btn} button on the ${cn} list isn't shown.`;
+  } else if (lim) {
     const fx = lim.effect;
     effectHtml = fx.editable ? 'This field is editable.'
       : fx.visible ? 'This field is visible but read-only.'
@@ -1938,10 +2008,10 @@ function buildFinalCard(t, lim) {
   badge.className = 'final-badge cell-' + t.final;
   badge.textContent = t.final;
   // Same cue as the Role Matrix cell: the letter stays the sheet value, hatching + 🔒 flag the cap.
-  if (lim && lim.effect.limitedByRecord) {
+  if (isHeldBack(lim)) {
     badge.classList.add('capped');
     badge.insertAdjacentHTML('beforeend', CAP_MARK_HTML);
-    badge.title = capTitle(lim.effect.limitedByRecord, lim.fieldPerm, lim.entityPerm);
+    badge.title = heldBackTitle(lim);
   }
   card.appendChild(badge);
   const info = document.createElement('div');
@@ -2818,6 +2888,59 @@ function runTests() {
     return { ok, detail: `badge/chip/cell marked=${marked.join('/')}, letter kept=${letterKept}` };
   };
 
+  // Child-list Add / Remove buttons: the parent's Create<X> / Remove<X> row AND the child X's own
+  // record-level permission (looked up without a record) must both allow Modify.
+  const CL = (parentPerm, createVal, removeVal, extraOps) => makeBlock('Asset', '', ['Role A'], [parentPerm], [
+    ...(createVal ? [{ name: 'CreateAssetFeature', values: [createVal] }] : []),
+    ...(removeVal ? [{ name: 'RemoveAssetFeature', values: [removeVal] }] : []),
+    { name: 'Fld', values: ['F'] }, ...(extraOps || [])]);
+  const CH = (perm, conds) => makeBlock('AssetFeature', '', ['Role A'], [perm], [], conds);
+  const childCases = [
+    { name: 'child R → Add not shown although CreateAssetFeature = F', parent: CL('M', 'F', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R' } },
+    { name: 'child N → Add not shown', parent: CL('M', 'F', 'F'), blocks: [CH('N')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'N' } },
+    { name: 'child M → Add shown', parent: CL('M', 'F', 'F'), blocks: [CH('M')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: true, byChild: false, byRecord: null, childPerm: 'M' } },
+    { name: 'Remove row: child R → Remove not shown', parent: CL('M', 'F', 'F'), blocks: [CH('R')], op: 'RemoveAssetFeature', expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R' } },
+    { name: 'parent R, child M → held back by the parent record only', parent: CL('R', 'F', 'F'), blocks: [CH('M')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: false, byRecord: 'readOnly', childPerm: 'M' } },
+    { name: 'parent R, child R → held back by both', parent: CL('R', 'F', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: true, byRecord: 'readOnly', childPerm: 'R' } },
+    { name: 'Create row itself R → not "held back" (the row already says no)', parent: CL('M', 'R', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'R', exp: { shown: false, byChild: false, byRecord: null, childPerm: 'R' } },
+    { name: 'no Remove row → not treated as a child-list action', parent: CL('M', 'F', null), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'F', exp: { notChild: true, shown: true } },
+    { name: 'no child block in the sheet → not treated as a child-list action', parent: CL('M', 'F', 'F'), blocks: [], op: 'CreateAssetFeature', expEval: 'F', exp: { notChild: true, shown: true } },
+    { name: 'ordinary field row → unaffected', parent: CL('M', 'F', 'F'), blocks: [CH('R')], op: 'Fld', expEval: 'F', exp: { notChild: true, shown: true } },
+    { name: 'child has only a conditional block → role defaults (Role A default R) → not shown', parent: CL('M', 'F', 'F'), blocks: [CH('F', [{ name: 'IsActive', values: ['Y'] }])], op: 'CreateAssetFeature', roles: [['Role A', 'R']], expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R', source: 'roleDefaults' } },
+    { name: 'child has only a conditional block, role default X → GP F → shown', parent: CL('M', 'F', 'F'), blocks: [CH('N', [{ name: 'IsActive', values: ['Y'] }])], op: 'CreateAssetFeature', site: 'F', expEval: 'F', exp: { shown: true, byChild: false, byRecord: null, childPerm: 'F', source: 'roleDefaults' } },
+    { name: 'child static R + conditional F → static block decides → not shown', parent: CL('M', 'F', 'F'), blocks: [CH('R'), CH('F', [{ name: 'IsActive', values: ['Y'] }])], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R', source: 'block' } },
+    { name: 'role typed in different case still finds its column in the child block', parent: CL('M', 'F', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', roles: [['role a', 'F']], expEval: 'F', exp: { shown: false, byChild: true, byRecord: null, childPerm: 'R' } }
+  ];
+  const runChild = (tc) => {
+    const roles = mkRoles(tc.roles || [['Role A', 'X']]), site = tc.site || 'R';
+    const sheetBlocks = [tc.parent, ...tc.blocks];
+    const ev = evaluate(tc.parent, tc.op, roles, site, {}).final;
+    const lim = recordLimitFor('Entities', tc.parent, tc.op, roles, site, {}, sheetBlocks);
+    const e = lim.effect;
+    if (tc.exp.notChild) {
+      const ok = ev === tc.expEval && !lim.child && e.editable === tc.exp.shown;
+      return { ok, detail: `evaluate=${ev}, child=${lim.child ? lim.child.name : 'none'}, editable=${e.editable}` };
+    }
+    const ok = ev === tc.expEval && !!lim.child && e.editable === tc.exp.shown && e.visible === tc.exp.shown
+      && !!e.limitedByChild === tc.exp.byChild && e.limitedByRecord === tc.exp.byRecord
+      && lim.child.perm === tc.exp.childPerm && (!tc.exp.source || lim.child.source === tc.exp.source);
+    return { ok, detail: `evaluate=${ev}, shown=${e.editable}, byChild=${!!e.limitedByChild}, byRecord=${e.limitedByRecord}, child=${lim.child && lim.child.perm} (${lim.child && lim.child.source})` };
+  };
+  // The held-back marker also appears for a child-list button, in all three views.
+  const childMarkerCase = () => {
+    const roles = mkRoles([['Role A', 'X']]), parent = CL('M', 'F', 'F'), sheetBlocks = [parent, CH('R')];
+    const t = evaluate(parent, 'CreateAssetFeature', roles, 'R', {});
+    const lim = recordLimitFor('Entities', parent, 'CreateAssetFeature', roles, 'R', {}, sheetBlocks);
+    const badge = buildFinalCard(t, lim).querySelector('.final-badge');
+    const chipHost = document.createElement('div'); chipHost.innerHTML = resultChipHtml(t.final, lim);
+    const entityPerm = evaluate(parent, null, roles, 'R', {}).final;
+    const cell = buildMatrixRowsTable(parent, 'Entities', 0, [{ operation: 'CreateAssetFeature', label: '', finalPerm: t.final }], entityPerm, sheetBlocks, roles, 'R').querySelector('.matrix-perm');
+    const els = [badge, chipHost.firstElementChild, cell];
+    const ok = els.every(el => el.classList.contains('capped') && (el.title || '').includes('AssetFeature'));
+    return { ok, detail: `marked=${els.map(el => el.classList.contains('capped')).join('/')}` };
+  };
+  childCases.push({ name: 'held-back marker shows in Matrix, Trace and Field View for a child-list button', custom: childMarkerCase });
+
   const runParity = (tc) => {
     const roles = mkRoles(tc.roles), entity = tc.entity || {};
     if (tc.kind === 'eval') {
@@ -2842,7 +2965,8 @@ function runTests() {
     runGroup('UI effect — record access caps the field', uiCases, runUiEffect),
     runGroup('Framework parity — role case, filtered * column', parityCases, runParity),
     runGroup('Framework parity — which block is used', usageCases, runUsage),
-    runGroup('Held-back marker — Matrix, Trace and Field View agree', markerCases, runMarker)
+    runGroup('Held-back marker — Matrix, Trace and Field View agree', markerCases, runMarker),
+    runGroup('Child list — Add / Remove buttons need the child record too', childCases, tc => tc.custom ? tc.custom() : runChild(tc))
   ];
   const tp = groups.reduce((s, g) => s + g.passed, 0);
   const tt = groups.reduce((s, g) => s + g.total, 0);
@@ -3123,7 +3247,9 @@ function buildMatrixConditionsRow(block, sheetName, blockIdx) {
   return row;
 }
 
-function buildMatrixRowsTable(block, sheetName, blockIdx, rows, entityPerm) {
+function buildMatrixRowsTable(block, sheetName, blockIdx, rows, entityPerm, sheetBlocks, roles, siteLevel) {
+  const blocks = sheetBlocks || (parsed && parsed[sheetName]) || [];
+  const rolesUsed = roles || userRoles, siteUsed = siteLevel || siteLevelDefault;
   const grid = document.createElement('div');
   grid.className = 'matrix-rows';
   for (const r of rows) {
@@ -3141,12 +3267,12 @@ function buildMatrixRowsTable(block, sheetName, blockIdx, rows, entityPerm) {
     permCell.className = 'matrix-perm cell-' + r.finalPerm;
     permCell.textContent = r.finalPerm;
     permCell.title = `${PERM_NAME[r.finalPerm]} — click to see the full trace`;
-    // Only Entities fields are held back by their record (see recordLimitFor).
-    const limited = sheetName === 'Entities' ? fieldUiEffect(entityPerm, r.finalPerm).limitedByRecord : null;
-    if (limited) {
+    // Only Entities rows are held back by their record / child record (see recordLimitFor).
+    const lim = sheetName === 'Entities' ? combineLimit(entityPerm, r.finalPerm, childInfoFor(blocks, block, r.operation, rolesUsed, siteUsed)) : null;
+    if (isHeldBack(lim)) {
       permCell.classList.add('capped');
       permCell.insertAdjacentHTML('beforeend', CAP_MARK_HTML);
-      permCell.title = capTitle(limited, r.finalPerm, entityPerm) + ' Click to see the full trace.';
+      permCell.title = heldBackTitle(lim) + ' Click to see the full trace.';
     }
     permCell.addEventListener('click', () => drillIntoMatrixCell(sheetName, blockIdx, r.operation));
     rowEl.appendChild(permCell);
@@ -3255,9 +3381,13 @@ function buildMatrixCSV() {
       const rows = evaluateBlockRows(block, conds);
       const entityPerm = rows[0].finalPerm; // first row is always entity-level
       for (const r of rows) {
-        const limited = sheetName === 'Entities' && !r.isEntity ? fieldUiEffect(entityPerm, r.finalPerm).limitedByRecord : null;
-        const limitStr = limited === 'readOnly' ? `read-only: record is ${entityPerm}`
-          : limited === 'blocked' ? `hidden: record is ${entityPerm}` : '';
+        const lim = sheetName === 'Entities' && !r.isEntity
+          ? combineLimit(entityPerm, r.finalPerm, childInfoFor(parsed[sheetName], block, r.operation, userRoles, siteLevelDefault)) : null;
+        const limitParts = [];
+        if (lim && lim.effect.limitedByRecord === 'readOnly') limitParts.push(`read-only: record is ${entityPerm}`);
+        if (lim && lim.effect.limitedByRecord === 'blocked') limitParts.push(`hidden: record is ${entityPerm}`);
+        if (lim && lim.effect.limitedByChild) limitParts.push(`${buttonWord(lim.child)} button hidden: ${lim.child.name} is ${lim.child.perm}`);
+        const limitStr = limitParts.join('; ');
         lines.push([sheetName, block.identifier, block.label || '', r.operation, r.label, r.finalPerm, PERM_NAME[r.finalPerm], condStr, limitStr]);
       }
     });
@@ -3816,14 +3946,38 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
     });
     advisor.appendChild(note);
   }
+  // A child-list Add / Remove button also needs the child record at Modify or higher.
+  const childShort = !!(lim && lim.child) && tRank >= PERM_RANK.M && PERM_RANK[lim.child.perm] < PERM_RANK.M;
+  if (childShort) {
+    const c = lim.child, cn = escapeHtml(c.name), btn = buttonWord(c);
+    const note = document.createElement('div');
+    note.className = 'record-limit';
+    note.style.marginBottom = '10px';
+    const staticIdx = (parsed && parsed.Entities || []).reduce((acc, b, i) => (b.identifier === c.name && !(b.conditions && b.conditions.length)) ? i : acc, -1);
+    note.innerHTML =
+      `<strong>The ${cn} record holds this button back.</strong> Even at <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong> here, ` +
+      `${cn} itself is only <strong>${c.perm} — ${PERM_NAME[c.perm]}</strong> for this user, so the ${btn} button on the ${cn} list isn't shown. ` +
+      `${cn} also needs <strong>M — Modify</strong> or higher. ` +
+      (staticIdx >= 0
+        ? `<button type="button" class="matrix-link-btn fc-child-link">Show how to raise ${cn}</button>`
+        : `${cn} has no block without conditions, so it uses the highest default access level among the user's roles — raise one of those, or add a block without conditions for ${cn}.`);
+    const link = note.querySelector('.fc-child-link');
+    if (link) link.addEventListener('click', () => {
+      $('block').value = String(staticIdx); selectBlock();
+      $('operation').value = '';
+      $('targetPerm').value = 'M';
+      runFieldCoverage();
+    });
+    advisor.appendChild(note);
+  }
 
   // On target exactly → done.
   if (cRank === tRank) {
     const p = document.createElement('p');
     p.className = 'advisor-intro';
-    p.style.color = recordShort ? '' : '#059669';
-    p.innerHTML = recordShort
-      ? `In the spreadsheet this user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, so nothing on this field needs changing — the change needed is on the record (see above).`
+    p.style.color = (recordShort || childShort) ? '' : '#059669';
+    p.innerHTML = (recordShort || childShort)
+      ? `In the spreadsheet this user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, so nothing on this row needs changing — the change needed is on ${childShort ? `the ${escapeHtml(lim.child.name)} record` : 'the record'} (see above).`
       : `This user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}. Nothing to change.`;
     advisor.appendChild(p);
     host.appendChild(advisor);

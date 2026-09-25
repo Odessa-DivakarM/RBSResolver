@@ -350,6 +350,58 @@ Sources: `CommandHelper.IsAccessible` (Create needs `Modify`, other modes
 `DomainService.FilterWorkItemsBasedOnRBS` → `GetAllowedTransactions` (`Full`),
 `JobTaskConfigQueryables` (tasks need `Modify`).
 
+
+### 7.4 Child-list Add and Remove buttons
+
+For every child whose `ParentRelation` is `OneToMany` or `OneToOneOptional`,
+the parent's behaviour gets two implicit actions, `Create<Child>` and
+`Remove<Child>` (`Behavior.RegisterDefaultChildActions`, `Category = Compute`;
+an explicitly declared action of the same name takes its place). Both appear as
+operation rows in the parent's block.
+
+The child list's (`EditCollection`) Add / Remove buttons are shown only when
+**all** hold:
+
+| # | Check | Source |
+|---|---|---|
+| 1 | The **child** entity covers `Modify` — a lookup by name, so the child's block without conditions, else the highest role default (§9.7, §9.5) | `GridPanelHelper.IsCreateActionAllowed` / `IsRemoveActionAllowed`; when false the button is not built (`GridActionItem.CreateDefaultActions`) |
+| 2 | The parent's `Create<Child>` / `Remove<Child>` action is enabled and visible — parent entity **and** that row cover `Modify` (§7.1) | `GridActionWidgetHtmlElementProperties.IsEnabled` → `FieldProperties("Create" + child)` |
+| 3 | `ShowCreateAction` / `ShowRemoveAction` on the collection, and the form model is not read-only | XAML — not visible to the visualizer |
+
+`GridActionItem` sends the button with `IsVisible = IsParentVisible && IsEnabled`,
+so a disabled button is hidden. The parent's row can only take the button
+away, never grant it. Existing child rows follow the child's own entity-level
+value (`R` → read-only rows; `N` / `X` → the grid shows no columns).
+
+**How the visualizer detects it.** A row is treated as a child-list button only
+when the block has **both** `Create<X>` and `Remove<X>` rows and the Entities
+sheet has a block named `X` (`childListAction`). Hand-written actions that
+merely start with `Create` are therefore not mistaken for one: in the base
+framework (checked in `Lw.Domain.Base`; product layers not checked), every explicit `Create<X>` action whose `X` is an entity creates a
+record that is *not* a child of the owning entity, and the only explicit
+`Create<X>`/`Remove<X>` pairs are `Category = Helper` (never in the workbook).
+The child's value is computed as the framework looks it up — its block without
+conditions, else `MAX(role defaults)` (`childEntityLevel`) — and the result is
+shown with the same 🔒 marker as §7.1 in all three views and in the CSV
+`LimitedByRecord` column.
+
+Not flagged by the visualizer:
+
+- A child that is missing from the workbook (the framework then uses role
+  defaults — usually `Full`). Without a block the pair alone is not treated as
+  proof of a child list.
+- `OneToOneOptional` children, which get the same action pair but are not
+  necessarily shown as a list; the workbook does not say which relation a child
+  has, so they are treated like lists.
+- A grandchild collection bound on the root form, whose Create button is
+  disabled outright (`GridActionWidgetHtmlElementProperties.IsEnabled`).
+- Script-driven child edits (`ManipulationContext`), which check only the
+  parent's `Create<Child>` action.
+
+`AbstractEntryFormController.CreateChildEntity` →
+`AbstractEntity.PerformAddChildEntityAction` performs no RBS check itself; the
+checks above are applied when the form and grid are rendered.
+
 ---
 
 ## 8. Where this runs
