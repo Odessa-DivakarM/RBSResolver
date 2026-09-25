@@ -369,6 +369,18 @@ Its `Create<Child>` / `Remove<Child>` are ordinary parent actions, gated only by
 §7.1 (parent entity and row cover `Modify`); the child's own permission is not
 checked.
 
+A `OneToOneMandatory` child has no list either, and no actions at all: the child
+always exists with its parent, so `Behavior.RegisterDefaultChildActions` adds
+`Create<Child>` / `Remove<Child>` only for `OneToMany` and `OneToOneOptional`,
+and `AbstractBehavior` adds no `Has…` condition for it. Its parent's block has
+none of these rows, so there is nothing to gate.
+
+| Relation | Implicit actions | Implicit conditions | List (Add / Remove buttons) |
+|---|---|---|---|
+| `OneToMany` | `Create<X>`, `Remove<X>` | `Has<Plural>`, `HasNew<Plural>` | yes — also needs the child at `Modify` (below) |
+| `OneToOneOptional` | `Create<X>`, `Remove<X>` | `Has<X>` | no — ordinary parent actions (§7.1) |
+| `OneToOneMandatory` | none | none | no — nothing to gate |
+
 A `OneToMany` child list's (`EditCollection`) Add / Remove buttons are shown
 only when **all** hold:
 
@@ -409,7 +421,9 @@ models of `Odessa.Framework` and `Odessa.Framework.Core`: of 1,427 detected
 pairs, 1,401 could be checked — all are real parent → child relations (0 false
 positives, 0 real children missed), and the one-to-one rule classifies all 92
 `OneToOneOptional` and all 1,309 `OneToMany` children correctly. The other 26
-pairs involve entities from a layer outside those two repositories.
+pairs involve entities from a layer outside those two repositories. None of the
+20 `OneToOneMandatory` children in those models has a `Create<X>`, `Remove<X>`
+or `Has<X>` row in its parent's block.
 The child's value is computed as the framework looks it up — its block without
 conditions, else `MAX(role defaults)` (`childEntityLevel`) — and the result is
 shown with the same 🔒 marker as §7.1 in all three views and in the CSV
