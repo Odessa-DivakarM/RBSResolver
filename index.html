@@ -2926,6 +2926,10 @@ function runTests() {
     { name: 'parent R, child M → held back by the parent record only', parent: CL('R', 'F', 'F'), blocks: [CH('M')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: false, byRecord: 'readOnly', childPerm: 'M' } },
     { name: 'parent R, child R → held back by both', parent: CL('R', 'F', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'F', exp: { shown: false, byChild: true, byRecord: 'readOnly', childPerm: 'R' } },
     { name: 'Create row itself R → not "held back" (the row already says no)', parent: CL('M', 'R', 'F'), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'R', exp: { shown: false, byChild: false, byRecord: null, childPerm: 'R' } },
+    { name: 'Create row R, child F → Add not shown: the row decides, a Full child cannot lift it', parent: CL('M', 'R', 'F'), blocks: [CH('F')], op: 'CreateAssetFeature', expEval: 'R', exp: { shown: false, byChild: false, byRecord: null, childPerm: 'F' } },
+    // A custom grid button (AssetForm's Delete = PerformAction DeactivateAssetFeatures) is gated only by the parent's
+    // record and its own row (GridActionWidgetHtmlElementProperties.IsAccessible) — never by the child entity.
+    { name: 'custom Delete action (DeactivateAssetFeatures) with child R → not a child-list button, still shown', parent: CL('M', 'F', 'F', [{ name: 'DeactivateAssetFeatures', values: ['F'] }, { name: 'HasAssetFeatures', values: ['F'] }, { name: 'HasNewAssetFeatures', values: ['F'] }]), blocks: [CH('R')], op: 'DeactivateAssetFeatures', expEval: 'F', exp: { notChild: true, shown: true } },
     { name: 'no Remove row → not treated as a child-list action', parent: CL('M', 'F', null), blocks: [CH('R')], op: 'CreateAssetFeature', expEval: 'F', exp: { notChild: true, shown: true } },
     { name: 'no child block in the sheet → not treated as a child-list action', parent: CL('M', 'F', 'F'), blocks: [], op: 'CreateAssetFeature', expEval: 'F', exp: { notChild: true, shown: true } },
     { name: 'ordinary field row → unaffected', parent: CL('M', 'F', 'F'), blocks: [CH('R')], op: 'Fld', expEval: 'F', exp: { notChild: true, shown: true } },
@@ -2978,6 +2982,22 @@ function runTests() {
     return { ok, detail: `marked=${els.map(el => el.classList.contains('capped')).join('/')}` };
   };
   childCases.push({ name: 'held-back marker shows in Matrix, Trace and Field View for a child-list button', custom: childMarkerCase });
+  // The opposite: when the Create row itself is R the button is off by its own value, so no view marks it as
+  // held back, and Trace still says the button isn't shown.
+  const childNoMarkerCase = () => {
+    const roles = mkRoles([['Role A', 'X']]), parent = CL('M', 'R', 'F'), sheetBlocks = [parent, CH('F')];
+    const t = evaluate(parent, 'CreateAssetFeature', roles, 'R', {});
+    const lim = recordLimitFor('Entities', parent, 'CreateAssetFeature', roles, 'R', {}, sheetBlocks);
+    const card = buildFinalCard(t, lim);
+    const chipHost = document.createElement('div'); chipHost.innerHTML = resultChipHtml(t.final, lim);
+    const entityPerm = evaluate(parent, null, roles, 'R', {}).final;
+    const cell = buildMatrixRowsTable(parent, 'Entities', 0, [{ operation: 'CreateAssetFeature', label: '', finalPerm: t.final }], entityPerm, sheetBlocks, roles, 'R').querySelector('.matrix-perm');
+    const els = [card.querySelector('.final-badge'), chipHost.firstElementChild, cell];
+    const ux = card.querySelector('.ux').textContent;
+    const ok = t.final === 'R' && els.every(el => !el.classList.contains('capped')) && ux.includes("isn't shown");
+    return { ok, detail: `evaluate=${t.final}, marked=${els.map(el => el.classList.contains('capped')).join('/')}, ux="${ux}"` };
+  };
+  childCases.push({ name: 'Create row R, child F → no held-back marker in any view, Trace says Add isn\'t shown', custom: childNoMarkerCase });
 
   const runParity = (tc) => {
     const roles = mkRoles(tc.roles), entity = tc.entity || {};

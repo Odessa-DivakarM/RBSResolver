@@ -395,6 +395,21 @@ so a disabled button is hidden. The parent's row can only take the button
 away, never grant it. Existing child rows follow the child's own entity-level
 value (`R` → read-only rows; `N` / `X` → the grid shows no columns).
 
+**Custom grid buttons are not child-list buttons.** A form can add its own
+buttons to a list (`EditCollection.ActionBar` → `GridAction` →
+`PerformAction`) — e.g. the Asset form hides Remove (`ShowRemoveAction="False"`)
+and shows *Delete* = `DeactivateAssetFeatures` instead. Such a button is gated
+only by the entity that owns the action (the form's entity, or the one on the
+`PerformAction.Property` path) and that action's row (§7.1), plus its XAML
+`Visible` and the form model not being read-only
+(`GridActionWidgetHtmlElementProperties.IsAccessible` →
+`AnyActionsVisibleAndEnabled`). The child entity's permission is **not**
+checked: with `AssetFeature` at `R`, Add is hidden but Delete is still shown and enabled. To
+block it, lower that action's row. The visualizer treats these rows as ordinary
+parent actions — nothing in the workbook ties an action like
+`DeactivateAssetFeatures` to the child (only its parameter type in the
+behaviour does), and guessing from the name would mislabel custom actions.
+
 **How the visualizer detects it.** A row is treated as a child-list button only
 when the block has **both** `Create<X>` and `Remove<X>` rows, the Entities
 sheet has a block named `X`, and `X` is not a one-to-one child
