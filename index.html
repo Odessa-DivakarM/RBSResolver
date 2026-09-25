@@ -825,9 +825,9 @@ function recordLimitText(lim) {
   const e = `<strong>${lim.entityPerm} — ${PERM_NAME[lim.entityPerm]}</strong>`;
   const parts = [];
   if (lim.effect.limitedByRecord === 'readOnly') {
-    parts.push(`This field allows ${f}, but the record itself is only ${e} for this user, so the field (or action) stays <strong>read-only</strong>. To make it editable, give the record Modify or higher.`);
+    parts.push(`This row allows ${f}, but the record itself is only ${e} for this user, so a field stays <strong>read-only</strong> and an action isn't shown. To make it usable, give the record Modify or higher.`);
   } else if (lim.effect.limitedByRecord === 'blocked') {
-    parts.push(`This field allows ${f}, but the record itself is ${e} for this user, so this field isn't shown. The record needs Read or higher first.`);
+    parts.push(`This row allows ${f}, but the record itself is ${e} for this user, so this field or action isn't shown. The record needs Read or higher first.`);
   }
   if (lim.effect.limitedByChild) {
     const c = lim.child, cn = escapeHtml(c.name), btn = buttonWord(c);
@@ -2021,9 +2021,9 @@ function buildFinalCard(t, lim) {
     effectHtml = lim.effect.editable ? `The ${btn} button on the ${cn} list is shown.` : `The ${btn} button on the ${cn} list isn't shown.`;
   } else if (lim) {
     const fx = lim.effect;
-    effectHtml = fx.editable ? 'This field is editable.'
-      : fx.visible ? 'This field is visible but read-only.'
-      : 'This field is hidden.';
+    effectHtml = fx.editable ? 'As a field: editable. As an action: can be used.'
+      : fx.visible ? 'As a field: visible but read-only. As an action: not shown (action buttons appear only when they can be used).'
+      : 'Not shown, whether this is a field or an action.';
   }
   const card = document.createElement('div');
   card.className = 'final-card';
