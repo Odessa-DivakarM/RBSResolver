@@ -586,6 +586,26 @@ code.inline {
 .story-block.is-stop { border-left-color: var(--accent); background: var(--tint-info-strong); }
 .story-block.is-circuit { border-left-color: var(--success); background: var(--tint-success); }
 .story-block.is-fallback { border-left-color: var(--tint-fallback-border); background: var(--tint-fallback); }
+.story-role { margin-bottom: 8px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 6px; }
+.story-role.is-win { border-left-color: var(--accent); }
+.story-role > summary { cursor: pointer; padding: 6px 12px; list-style: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; user-select: none; }
+.story-role > summary::-webkit-details-marker { display: none; }
+.story-role > summary::before { content: '▸'; font-size: 10px; color: var(--muted); transition: transform .15s; }
+.story-role[open] > summary::before { transform: rotate(90deg); }
+.story-role .story-where { color: var(--muted); font-size: 12px; }
+.story-role .story-steps { padding: 0 8px 1px; }
+.sheet-view-bar { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.sheet-view-bar[hidden] { display: none; }
+/* The only way back to the full sheet, so it must not look like muted helper text. */
+.sheet-view-bar .sheet-toggle { color: var(--accent); border-bottom-color: var(--accent); font-size: 12px; font-weight: 600; }
+.sheet-view-bar .sheet-toggle:hover { border-bottom-style: solid; }
+/* Trace sheet: an expanded large block scrolls in its own box (header row + row names pinned)
+   instead of pushing "How was this decided?" hundreds of rows down the page. */
+.sheet-scroll { overflow: auto; max-height: 70vh; padding-bottom: 4px; }
+.sheet-scroll table.sheet thead th { position: sticky; top: 0; z-index: 2; }
+.sheet-scroll table.sheet td.row-name { position: sticky; left: 0; z-index: 1; }
+.sheet-scroll table.sheet thead th.identifier { left: 0; z-index: 3; }
+.sheet-scroll table.sheet thead th.col-unmatched { opacity: 1; color: var(--muted); } /* see-through header would show rows under it */
 .story-outcome { margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
 .perm-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; }
 
@@ -636,6 +656,9 @@ code.inline {
 .matrix-tab { padding: 6px 14px; background: var(--surface-input); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px; }
 .matrix-tab.active { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 .matrix-block { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; }
+/* Thousands of blocks (~80k rows): skip layout/paint for off-screen ones. Without this, a search that opens
+   every matching block re-lays out the whole sheet on each keystroke (~1.5 s on a 3000-block Entities sheet). */
+.matrix-block { content-visibility: auto; contain-intrinsic-size: auto 44px; }
 .matrix-block summary { cursor: pointer; padding: 10px 14px; list-style: none; display: flex; align-items: center; gap: 10px; user-select: none; font-weight: 600; font-size: 13px; }
 .matrix-block summary::-webkit-details-marker { display: none; }
 .matrix-block summary::before { content: '▸'; font-size: 10px; color: var(--muted); transition: transform .15s; flex-shrink: 0; }
@@ -938,7 +961,10 @@ function isOneToOneChild(block, x) {
 function childEntityLevel(sheetBlocks, childName, roles, siteLevel) {
   let staticBlock = null;
   for (const b of sheetBlocks) if (b.identifier === childName && !(b.conditions && b.conditions.length)) staticBlock = b; // last one wins
-  if (staticBlock) return { perm: evaluate(staticBlock, null, roles, siteLevel, {}).final, source: 'block' };
+  if (staticBlock) {
+    const trace = evaluate(staticBlock, null, roles, siteLevel, {});
+    return { perm: trace.final, source: 'block', block: staticBlock, trace };
+  }
   // No block without conditions → UserPermissionCache.DefaultPermissionResult = MAX(role defaults).
   const site = normCode(siteLevel || 'F');
   const perm = maxPerm(...roles.filter(r => r.name).map(r => { const p = normCode(r.defaultPermission); return p === 'X' ? site : p; }));
@@ -948,7 +974,7 @@ function childInfoFor(sheetBlocks, block, operationName, roles, siteLevel) {
   const cl = childListAction(sheetBlocks, block, operationName);
   if (!cl) return null;
   const c = childEntityLevel(sheetBlocks, cl.child, roles, siteLevel);
-  return { name: cl.child, kind: cl.kind, perm: c.perm, source: c.source };
+  return { name: cl.child, kind: cl.kind, perm: c.perm, source: c.source, block: c.block || null, trace: c.trace || null };
 }
 
 // Combine the record, the row and (for a child-list button) the child record. "Held back" means the row
@@ -1754,6 +1780,7 @@ function selectSheet(s) {
     opt.textContent = b.identifier + twin + (b.label ? ` — ${b.label}` : '');
     sel.appendChild(opt);
   });
+  sel._blocks = parsed[s]; // which list these options are for (see drillIntoMatrixCell)
   if (parsed[s].length) {
     sel.value = '0';
     selectBlock();
@@ -2025,6 +2052,22 @@ function stepSentence(stepN, roleName, opName, value, stopped) {
   }
 }
 
+// Up to this many roles with a column, the narrative tells each role's story in full; beyond it, one line each.
+const NARRATIVE_ROLES_OPEN = 3;
+
+// Short "where the answer came from" for a role's one-line summary; same wording as stepSentence.
+function stepSource(stepN, opName) {
+  const op = opName ? `<strong>${escapeHtml(opName)}</strong>` : 'the selected action';
+  switch (stepN) {
+    case 1: return `its own value for ${op}`;
+    case 2: return `the shared <strong>*</strong> value for ${op}`;
+    case 3: return 'its value for the whole record';
+    case 4: return 'the shared <strong>*</strong> value for the whole record';
+    case 5: return 'its default access level';
+    default: return '';
+  }
+}
+
 function appendGroupASteps(container, role, opName) {
   for (const s of role.steps) {
     addStoryBlock(container, stepSentence(s.n, role.role, opName, s.value, s.stop), s.stop ? 'is-stop' : '');
@@ -2088,14 +2131,43 @@ function buildNarrativeTrace(t) {
     return wrap;
   }
 
+  // Many roles × up to 5 checks each is a wall of text, so past a few roles each one collapses to a
+  // one-line answer (open the first winner) and its checks sit behind the expander.
+  const compact = t.groupA.length > NARRATIVE_ROLES_OPEN;
+  if (compact) {
+    addStoryBlock(wrap,
+      `${t.groupA.length} of the user's roles have their own column in this record type's rules. Each one is checked on its own &mdash; up to 5 checks, stopping at the first real answer &mdash; and the most permissive answer wins. Open a role to see its checks.`);
+  }
+  const roleCounts = {};
+  for (const r of t.groupA) roleCounts[r.role] = (roleCounts[r.role] || 0) + 1;
+  let winnerOpened = false;
   for (const role of t.groupA) {
+    let host = wrap;
+    if (compact) {
+      const det = document.createElement('details');
+      const win = role.result === t.roleBasedPerm;
+      det.className = 'story-role' + (win ? ' is-win' : '');
+      if (win && !winnerOpened) { det.open = true; winnerOpened = true; }
+      const stop = role.steps.find(s => s.stop);
+      const colTag = roleCounts[role.role] > 1 ? ` <span class="story-where">(column ${role.columnIndex})</span>` : '';
+      const sum = document.createElement('summary');
+      sum.innerHTML = `<strong>${escapeHtml(role.role)}</strong>${colTag} &rarr; ${permChip(role.result)}` +
+        (stop ? `<span class="story-where">&middot; from ${stepSource(stop.n, t.operationName)}</span>` : '');
+      det.appendChild(sum);
+      host = document.createElement('div');
+      host.className = 'story-steps';
+      det.appendChild(host);
+      wrap.appendChild(det);
+    }
     if (role.substituted) {
-      addStoryBlock(wrap,
+      addStoryBlock(host,
         `Note: <strong>${escapeHtml(role.role)}</strong>'s database default was X (not set), so it was replaced with the system fallback (${permChip(role.defaultPerm)}) before checking.`);
     }
-    addStoryBlock(wrap,
-      `<strong>${escapeHtml(role.role)}</strong> has its own column in this record type's rules. The system works through up to 5 checks, stopping at the first real answer.`);
-    appendGroupASteps(wrap, role, t.operationName);
+    if (!compact) {
+      addStoryBlock(host,
+        `<strong>${escapeHtml(role.role)}</strong> has its own column in this record type's rules. The system works through up to 5 checks, stopping at the first real answer.`);
+    }
+    appendGroupASteps(host, role, t.operationName);
   }
 
   if (t.groupA.length > 1) {
@@ -2127,6 +2199,9 @@ function buildNarrativeTrace(t) {
 function renderResults(block, operationName, t, lim) {
   const out = $('output');
   out.innerHTML = '';
+
+  // ---- way back after "Open <child> in Trace" (hidden once back on that record)
+  if (traceReturn && traceReturn.parsed === parsed && traceReturn.block !== block) out.appendChild(buildBackLink());
 
   // ---- banners
   const banners = [];
@@ -2173,14 +2248,121 @@ function renderResults(block, operationName, t, lim) {
   // ---- final card
   out.appendChild(buildFinalCard(t, lim));
 
-  // ---- mini sheet view
+  // ---- mini sheet view (compact on large blocks, and height-capped when expanded, so the trace stays close)
   out.appendChild(buildSheetPanel(block, operationName, t));
 
   // ---- resolution trace
   out.appendChild(buildTracePanel(t));
 
+  // ---- a child-list Add / Remove button also depends on the child record
+  if (lim && lim.child) out.appendChild(buildChildPanel(lim, sheetBlocks));
+
   // ---- conditions panel
   if (block.conditions.length) out.appendChild(buildConditionsPanel(block));
+}
+
+// Where "Open <child> in Trace" was clicked, so the child's trace can offer a way back to the same row with
+// the same record property values. Tied to its workbook — a new upload makes block positions meaningless.
+let traceReturn = null; // { parsed, block, sheet, blockIdx, op, state, label }
+
+function buildBackLink() {
+  const r = traceReturn;
+  const bar = document.createElement('div');
+  bar.className = 'sheet-view-bar';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'matrix-link-btn sheet-toggle';
+  btn.textContent = `← Back to ${r.label}`;
+  btn.addEventListener('click', () => {
+    traceReturn = null;
+    drillIntoMatrixCell(r.sheet, r.blockIdx, r.op);
+    // drillIntoMatrixCell takes record properties from the Role Matrix; put back the ones Trace had.
+    entityState = { ...r.state };
+    const sels = $('conditionList') ? $('conditionList').querySelectorAll('select') : [];
+    r.block.conditions.forEach((c, i) => { if (sels[i]) sels[i].value = r.state[c.name] || ''; });
+    runEvaluate();
+  });
+  bar.appendChild(btn);
+  return bar;
+}
+
+// A child list's Add / Remove button also needs the child record itself at Modify (SPEC.md §7.4). That is a
+// lookup by name, not for one record: the child's block without record properties, else the role defaults.
+// Shows the value the 🔒 decision used (lim.child.trace is that same evaluation) and how it was reached.
+function buildChildPanel(lim, sheetBlocks) {
+  const c = lim.child, cn = escapeHtml(c.name), btn = buttonWord(c);
+  const enough = PERM_RANK[c.perm] >= PERM_RANK.M;
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `<h2>Also checked: the ${cn} record</h2>
+    <p style="font-size:13px; margin:0 0 10px;">The ${btn} button of the ${cn} list needs ${cn} itself at Modify or higher, not just this row.
+    For this user ${cn} is ${permChip(c.perm)} &mdash; ${enough ? `enough for the ${btn} button` : `below Modify, so the ${btn} button isn't shown`}.</p>`;
+  const note = (html) => {
+    const p = document.createElement('p');
+    p.className = 'muted-note';
+    p.style.margin = '0 0 10px';
+    p.innerHTML = html;
+    panel.appendChild(p);
+  };
+
+  if (c.source !== 'block' || !c.block) {
+    const site = normCode(siteLevelDefault || 'F');
+    const list = userRoles.filter(r => r.name).map(r => {
+      const p = normCode(r.defaultPermission);
+      return `${escapeHtml(r.name)} ${p === 'X' ? `(not set &rarr; system fallback ${site})` : p}`;
+    }).join(', ');
+    note(`${cn} has no block without record properties in the sheet, so the system uses the highest default access level among the user's roles${list ? `: ${list}` : ''}.`);
+    return panel;
+  }
+
+  const sameName = (sheetBlocks || []).filter(b => b.identifier === c.name);
+  const withProps = sameName.filter(b => b.conditions && b.conditions.length).length;
+  const plain = sameName.length - withProps;
+  const bits = [];
+  if (withProps) bits.push(`${cn} is looked up by name, not for one record, so its ${withProps} block(s) with record properties don't count here.`);
+  if (plain > 1) bits.push(`It has ${plain} blocks without record properties; the last one is used.`);
+  if (bits.length) note(bits.join(' '));
+
+  const compactCols = c.block.roleColumns.length > SHEET_COMPACT_COLS;
+  const cols = compactCols ? sheetUsedColumns(c.block) : c.block.roleColumns;
+  if (compactCols) note(`${cn}'s Permissions row &mdash; ${cols.length} of ${c.block.roleColumns.length} role columns (this user's roles and <strong>*</strong>).`);
+  const wrap = document.createElement('div');
+  wrap.className = 'sheet-scroll';
+  wrap.appendChild(buildSheetTable(c.block, null, c.trace, cols, []));
+  panel.appendChild(wrap);
+
+  const det = document.createElement('details');
+  det.className = 'steps-key';
+  det.style.marginTop = '12px';
+  const sum = document.createElement('summary');
+  det.open = true; // short, and it is the "why" behind the 🔒 — often a default, which the table can't show
+  sum.textContent = `How was ${c.name} decided?`;
+  det.appendChild(sum);
+  const body = document.createElement('div');
+  body.className = 'key-body';
+  body.appendChild(buildNarrativeTrace(c.trace));
+  det.appendChild(body);
+  panel.appendChild(det);
+
+  const idx = parsed && sheetBlocks === parsed.Entities ? sheetBlocks.indexOf(c.block) : -1;
+  if (idx >= 0) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'matrix-link-btn sheet-toggle';
+    open.style.fontSize = '12px';
+    open.textContent = `Open ${c.name} in Trace`;
+    open.addEventListener('click', () => {
+      const op = $('operation').value || '';
+      traceReturn = { parsed, block: currentBlock, sheet: currentSheet, blockIdx: parseInt($('block').value, 10), op,
+        state: { ...entityState }, label: currentBlock.identifier + (op ? ' › ' + op : '') };
+      drillIntoMatrixCell('Entities', idx, '');
+    });
+    const row = document.createElement('div');
+    row.className = 'sheet-view-bar';
+    row.appendChild(open);
+    panel.appendChild(row);
+  }
+  return panel;
 }
 
 function buildFinalCard(t, lim) {
@@ -2262,14 +2444,57 @@ function buildSheetPanel(block, operationName, t) {
     `<span><span class="swatch" style="background:var(--panel); outline:2px dashed var(--accent); outline-offset:-2px;"></span>read &mdash; visited, kept cascading</span>` +
     `<span><span class="swatch" style="background:var(--panel); outline:3px solid var(--accent); outline-offset:-3px; position:relative; display:inline-block;"><span style="position:absolute; top:0; right:0; width:0; height:0; border-style:solid; border-width:0 6px 6px 0; border-color:transparent var(--accent) transparent transparent;"></span></span>stopped &mdash; returned this value</span>`;
   panel.appendChild(legend);
+  const bar = document.createElement('div');
+  bar.className = 'sheet-view-bar';
+  panel.appendChild(bar);
   const wrap = document.createElement('div');
-  wrap.className = 'scroll-x';
-  wrap.appendChild(buildSheetTable(block, operationName, t));
+  wrap.className = 'sheet-scroll';
   panel.appendChild(wrap);
+
+  // A large block (hundreds of rows × dozens of role columns) buries everything below it, so by default
+  // only what this answer can use is drawn: the selected row, and the columns of this user's roles and *.
+  // A small block is shown whole — it doesn't bury anything, and the full grid is the better context.
+  const usedCols = block.roleColumns.length > SHEET_COMPACT_COLS ? sheetUsedColumns(block) : block.roleColumns;
+  const usedOps = block.operations.length > SHEET_COMPACT_ROWS
+    ? block.operations.filter(o => operationName && o.name === operationName) : block.operations;
+  const draw = () => {
+    const cols = sheetShowAll.cols ? block.roleColumns : usedCols;
+    const ops = sheetShowAll.rows ? block.operations : usedOps;
+    wrap.replaceChildren(buildSheetTable(block, operationName, t, cols, ops));
+    bar.replaceChildren();
+    const toggle = (key, total, used, noun) => {
+      if (used === total) return;
+      const span = document.createElement('span');
+      span.textContent = `${sheetShowAll[key] ? total : used} of ${total} ${noun} `;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'matrix-link-btn sheet-toggle';
+      btn.textContent = sheetShowAll[key] ? 'show only the ones used' : 'show all';
+      btn.addEventListener('click', () => { sheetShowAll[key] = !sheetShowAll[key]; draw(); });
+      span.appendChild(btn);
+      bar.appendChild(span);
+    };
+    toggle('rows', block.operations.length, usedOps.length, 'field / action rows');
+    toggle('cols', block.roleColumns.length, usedCols.length, 'role columns');
+    bar.hidden = !bar.childElementCount;
+  };
+  draw();
   return panel;
 }
 
-function buildSheetTable(block, operationName, t) {
+// Trace sheet: show every row / column, or only the ones the answer can use. Kept for the session,
+// so someone who wants the full sheet isn't reset on every re-evaluate.
+const sheetShowAll = { rows: false, cols: false };
+const SHEET_COMPACT_ROWS = 12, SHEET_COMPACT_COLS = 10;
+
+// Columns that can take part in this user's answer: their own roles' columns (including ones switched
+// off by record properties — shown struck through, which explains why they didn't count) and every *.
+function sheetUsedColumns(block) {
+  const mine = new Set(userRoles.filter(r => r.name).map(r => roleNameIn(block, r.name)));
+  return block.roleColumns.filter(rc => rc.name === '*' || mine.has(rc.name));
+}
+
+function buildSheetTable(block, operationName, t, cols = block.roleColumns, ops = block.operations) {
   const readSet = t ? t.readCells : new Set();
   const stopSet = t ? t.stopCells : new Set();
   const stepMap = (t && t.stepNumbers) ? t.stepNumbers : new Map();
@@ -2282,7 +2507,7 @@ function buildSheetTable(block, operationName, t) {
   // (i.e. genuine duplicate-column case in conditional RBS).
   const nameCounts = {};
   for (const rc of block.roleColumns) nameCounts[rc.name] = (nameCounts[rc.name] || 0) + 1;
-  for (const rc of block.roleColumns) {
+  for (const rc of cols) {
     const th = document.createElement('th'); th.className = 'role';
     th.textContent = nameCounts[rc.name] > 1 ? `${rc.name} [col${rc.columnIndex}]` : rc.name;
     if (unmatched.has(rc.columnIndex)) th.classList.add('col-unmatched');
@@ -2297,7 +2522,7 @@ function buildSheetTable(block, operationName, t) {
     const td0 = document.createElement('td'); td0.className = 'row-name';
     td0.textContent = c.name + (t && t.entityState[c.name] ? ` = ${t.entityState[c.name]}` : ' = ?');
     tr.appendChild(td0);
-    for (const rc of block.roleColumns) {
+    for (const rc of cols) {
       const td = document.createElement('td');
       td.textContent = c.values[rc.columnIndex] || '';
       if (unmatched.has(rc.columnIndex)) td.classList.add('cell-unmatched');
@@ -2309,7 +2534,7 @@ function buildSheetTable(block, operationName, t) {
   if (block.permissions) {
     const tr = document.createElement('tr'); tr.className = 'row-perm';
     const td0 = document.createElement('td'); td0.className = 'row-name'; td0.textContent = 'Permissions'; tr.appendChild(td0);
-    for (const rc of block.roleColumns) {
+    for (const rc of cols) {
       const v = block.permissions[rc.columnIndex] || 'X';
       const td = document.createElement('td');
       td.classList.add('cell-' + v);
@@ -2324,12 +2549,12 @@ function buildSheetTable(block, operationName, t) {
     tbody.appendChild(tr);
   }
 
-  for (const o of block.operations) {
+  for (const o of ops) {
     const tr = document.createElement('tr');
     const isActive = operationName && o.name === operationName;
     if (isActive) tr.classList.add('row-op-active');
     const td0 = document.createElement('td'); td0.className = 'row-name'; td0.textContent = o.name; tr.appendChild(td0);
-    for (const rc of block.roleColumns) {
+    for (const rc of cols) {
       const v = o.values[rc.columnIndex] || 'X';
       const td = document.createElement('td');
       td.classList.add('cell-' + v);
@@ -3157,6 +3382,21 @@ function runTests() {
     return { ok, detail: `marked=${els.map(el => el.classList.contains('capped')).join('/')}` };
   };
   childCases.push({ name: 'held-back marker shows in Matrix, Trace and Field View for a child-list button', custom: childMarkerCase });
+  // Trace's "Also checked: the child record" panel shows the value the 🔒 decision used, from that same
+  // evaluation, and says when a same-named block with record properties was left out of the lookup.
+  const childPanelCase = () => {
+    const roles = mkRoles([['Role A', 'X']]), parent = CL('M', 'F', 'F');
+    const withProps = CH('F', [{ name: 'IsLeased', values: ['Y'] }]), plain = CH('R');
+    const sheetBlocks = [parent, withProps, plain];
+    const lim = recordLimitFor('Entities', parent, 'CreateAssetFeature', roles, 'R', {}, sheetBlocks);
+    const el = buildChildPanel(lim, sheetBlocks), text = el.textContent;
+    const stop = el.querySelector('table.sheet td.cell-stop');
+    const ok = lim.child.block === plain && lim.child.trace.final === lim.child.perm && lim.child.perm === 'R'
+      && text.includes('below Modify') && text.includes('1 block(s) with record properties')
+      && !!stop && stop.textContent === 'R';
+    return { ok, detail: `child=${lim.child.perm}, block=${lim.child.block === plain ? 'plain' : 'other'}, stop=${stop && stop.textContent}` };
+  };
+  childCases.push({ name: 'Trace "Also checked" panel: same value as the 🔒 decision, blocks with record properties called out', custom: childPanelCase });
   // The opposite: when the Create row itself is R the button is off by its own value, so no view marks it as
   // held back, and Trace still says the button isn't shown.
   const childNoMarkerCase = () => {
@@ -3203,6 +3443,41 @@ function runTests() {
     return { ok: got === tc.expected, detail: `fails=${got}, expected ${tc.expected}` };
   };
 
+  // Trace sheet on a large block: the compact view drops rows / columns, never a cell the answer read, and
+  // keeps this user's struck-through columns (they explain why a role didn't count).
+  const bigBlock = (conds) => {
+    const names = ['*', ...Array.from({ length: 12 }, (_, i) => 'Role ' + i)];
+    const ops = Array.from({ length: 14 }, (_, i) => ({ name: 'Op' + i, values: names.map((n, k) => (i === 5 && k === 4 ? 'M' : 'X')) }));
+    return makeBlock('Big', '', names, names.map((n, k) => (k === 0 ? 'R' : 'X')), ops, conds);
+  };
+  const compactCases = [
+    { name: 'own column answers the row: compact = Permissions + that row, * + own column', roles: [['Role 3', 'N'], ['Unlisted', 'X']], op: 'Op5', exp: { rows: 3, cols: 3, struck: 0 } },
+    { name: 'no row selected: compact = Permissions row only', roles: [['Role 3', 'N']], op: null, exp: { rows: 2, cols: 3, struck: 0 } },
+    { name: 'own column switched off by a record property stays visible, struck through', roles: [['Role 3', 'N']], op: 'Op5',
+      conds: [{ name: 'IsLeased', values: ['', '', '', '', 'Y'] }], entity: { IsLeased: 'F' }, exp: { rows: 4, cols: 3, struck: 1 } }
+  ];
+  const runCompact = (tc) => {
+    const savedRoles = userRoles.splice(0, userRoles.length, ...mkRoles(tc.roles)), savedAll = { ...sheetShowAll };
+    try {
+      const b = bigBlock(tc.conds), t = evaluate(b, tc.op, userRoles, 'R', tc.entity || {});
+      const count = (panel) => {
+        const tbl = panel.querySelector('table.sheet');
+        return { rows: tbl.rows.length, cols: tbl.rows[0].cells.length, read: tbl.querySelectorAll('.cell-read').length,
+          stop: tbl.querySelectorAll('.cell-stop').length, struck: tbl.querySelectorAll('th.col-unmatched').length };
+      };
+      sheetShowAll.rows = sheetShowAll.cols = false;
+      const small = count(buildSheetPanel(b, tc.op, t));
+      sheetShowAll.rows = sheetShowAll.cols = true;
+      const full = count(buildSheetPanel(b, tc.op, t));
+      const ok = small.rows === tc.exp.rows && small.cols === tc.exp.cols && small.struck === tc.exp.struck
+        && small.read > 0 && small.read === full.read && small.stop === full.stop;
+      return { ok, detail: `compact ${JSON.stringify(small)} vs full ${JSON.stringify(full)}` };
+    } finally {
+      userRoles.splice(0, userRoles.length, ...savedRoles);
+      Object.assign(sheetShowAll, savedAll);
+    }
+  };
+
   // ── Run all groups ──
   const groups = [
     runGroup('Core algorithm', tests, tc => {
@@ -3216,7 +3491,8 @@ function runTests() {
     runGroup('Framework parity — role case, filtered * column', parityCases, runParity),
     runGroup('Framework parity — which block is used', usageCases, runUsage),
     runGroup('Held-back marker — Matrix, Trace and Field View agree', markerCases, runMarker),
-    runGroup('Child list — Add / Remove buttons need the child record too', childCases, tc => tc.custom ? tc.custom() : runChild(tc))
+    runGroup('Child list — Add / Remove buttons need the child record too', childCases, tc => tc.custom ? tc.custom() : runChild(tc)),
+    runGroup('Trace sheet — compact view keeps every cell the answer used', compactCases, runCompact)
   ];
   const tp = groups.reduce((s, g) => s + g.passed, 0);
   const tt = groups.reduce((s, g) => s + g.total, 0);
@@ -3298,9 +3574,11 @@ function buildMatrixFilterBar() {
   search.className = 'search';
   search.placeholder = 'Filter by record or field name…';
   search.value = matrixFilter.text;
+  // Keystrokes that arrive while a filter pass is running are folded into one pass with the latest text.
+  let pending = 0;
   search.addEventListener('input', e => {
     matrixFilter.text = e.target.value.trim().toLowerCase();
-    applyMatrixFilter();
+    if (!pending) pending = requestAnimationFrame(() => { pending = 0; applyMatrixFilter(); });
   });
   bar.appendChild(search);
 
@@ -3557,9 +3835,10 @@ function applyMatrixFilter() {
     const entityPerm = blockEl.dataset.entityPerm || 'X';
     let anyRowVisible = false;
     let anyOpMatch = false; // operation-name match (not just block-name) → worth auto-opening
-    blockEl.querySelectorAll('.matrix-row').forEach(rowEl => {
-      const op = (rowEl.dataset.op || '').toLowerCase();
-      const perm = rowEl.dataset.perm || 'X';
+    // Rows never change once a block is built (refreshMatrixBlock swaps in a new element), so read them once.
+    if (!blockEl._rows) blockEl._rows = [...blockEl.querySelectorAll('.matrix-row')].map(el =>
+      ({ el, op: (el.dataset.op || '').toLowerCase(), perm: el.dataset.perm || 'X' }));
+    blockEl._rows.forEach(({ el: rowEl, op, perm }) => {
       const opMatch = !!q && op && op.includes(q);
       const textMatch = !q || opMatch || blockId.includes(q);
       const levelMatch = levels.has(perm);
@@ -3584,8 +3863,9 @@ function drillIntoMatrixCell(sheetName, blockIdx, operationName) {
   if (!block) return;
   // Switch to single mode first so panels are visible.
   setAppMode('single');
-  // Repopulate Step 2 selects to point at this block + operation.
-  selectSheet(sheetName);
+  // Repopulate Step 2 selects to point at this block + operation. The block list is only rebuilt when it
+  // isn't already this sheet's — on a 3000-block sheet the rebuild is most of a drill's cost.
+  if (currentSheet !== sheetName || $('block')._blocks !== parsed[sheetName]) selectSheet(sheetName);
   const blockSel = $('block');
   if (blockSel) {
     blockSel.value = String(blockIdx);
