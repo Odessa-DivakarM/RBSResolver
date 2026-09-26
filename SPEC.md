@@ -319,8 +319,7 @@ field-level result, never one role column's values.
   (`prepareGridActionWidget`).
 - **Modern UI** (`UserSession.IsModernized`): a form action that RBS shows (its
   entity and row cover `Read`) but that can't be used can turn **greyed out** —
-  but only when the form re-sends its properties, and a refresh re-sends only
-  widgets whose state changed (`AbstractMetaFormModel.AppendHtmlPropertiesJson`
+  but only when the form re-sends its properties, and a refresh re-sends a widget only when one of its sent properties changed (`AbstractMetaFormModel.AppendHtmlPropertiesJson`
   → `HtmlElementProperties.HasChangedFromLastCall`). So an action unusable from
   the start stays hidden; one that becomes unusable while the form is open
   (a conditional block, a behaviour rule) shows greyed
@@ -334,10 +333,7 @@ field-level result, never one role column's values.
   whose own record's `R` can grey it in the Modern UI as above), nor buttons that
   run a `Command` or an `ExecuteTransactionAction`, which don't check
   `IsModelReadOnly`. View and browse forms are never read-only models.
-- **XAML opt-in**: `PerformAction.AlwaysShowDisabledActionWidget="True"` shows
-  the button disabled from the first render in every UI, even on a read-only
-  record (`ShouldDisplayDisabledActionWidget`). Not used in Framework or Core
-  XAML.
+- **XAML opt-in**: `PerformAction.AlwaysShowDisabledActionWidget="True"` shows the button disabled on the web form's first render (classic and Modern), even on a read-only record (`ShouldDisplayDisabledActionWidget` → `framework.entryform.js`); a later refresh that re-sends the widget can hide it again, and the App serializer ignores it. Not used in Framework or Core XAML.
 
 The visualizer can't tell which of these applies, so Trace says an unusable
 action is "usually hidden; some screens show it greyed out".
