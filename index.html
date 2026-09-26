@@ -517,6 +517,9 @@ table.sheet td.row-name {
   text-align: left;
   vertical-align: top;
 }
+/* Long unbroken names (Global.UserRole.DefaultRolePermission) in monospace set the table's minimum width;
+   letting them break keeps the table inside its box on narrow windows instead of 5 px past it. */
+.steps-key table td { overflow-wrap: anywhere; }
 .steps-key table th {
   font-weight: 600;
   background: var(--surface-3);
@@ -3529,8 +3532,8 @@ function runTests() {
 
   // Trace sheet on a large block: the compact view drops rows / columns, never a cell the answer read, and
   // keeps this user's struck-through columns (they explain why a role didn't count).
-  const bigBlock = (conds) => {
-    const names = ['*', ...Array.from({ length: 12 }, (_, i) => 'Role ' + i)];
+  const bigBlock = (conds, extraCols = []) => {
+    const names = ['*', ...Array.from({ length: 12 }, (_, i) => 'Role ' + i), ...extraCols];
     const ops = Array.from({ length: 14 }, (_, i) => ({ name: 'Op' + i, values: names.map((n, k) => (i === 5 && k === 4 ? 'M' : 'X')) }));
     return makeBlock('Big', '', names, names.map((n, k) => (k === 0 ? 'R' : 'X')), ops, conds);
   };
@@ -3538,27 +3541,91 @@ function runTests() {
     { name: 'own column answers the row: compact = Permissions + that row, * + own column', roles: [['Role 3', 'N'], ['Unlisted', 'X']], op: 'Op5', exp: { rows: 3, cols: 3, struck: 0 } },
     { name: 'no row selected: compact = Permissions row only', roles: [['Role 3', 'N']], op: null, exp: { rows: 2, cols: 3, struck: 0 } },
     { name: 'own column switched off by a record property stays visible, struck through', roles: [['Role 3', 'N']], op: 'Op5',
-      conds: [{ name: 'IsLeased', values: ['', '', '', '', 'Y'] }], entity: { IsLeased: 'F' }, exp: { rows: 4, cols: 3, struck: 1 } }
+      conds: [{ name: 'IsLeased', values: ['', '', '', '', 'Y'] }], entity: { IsLeased: 'F' }, exp: { rows: 4, cols: 3, struck: 1 } },
+    { name: 'own column switched on by the record property: not struck, answers the row', roles: [['Role 3', 'N']], op: 'Op5',
+      conds: [{ name: 'IsLeased', values: ['', '', '', '', 'Y'] }], entity: { IsLeased: 'T' }, exp: { rows: 4, cols: 3, struck: 0, stopCol: 'Role 3' } },
+    { name: 'two columns for the same role: both kept, the switched-off one struck', roles: [['Role 3', 'N']], op: 'Op5', extraCols: ['Role 3'],
+      conds: [{ name: 'IsLeased', values: [...Array(13).fill(''), 'Y'] }], entity: { IsLeased: 'F' }, exp: { rows: 4, cols: 4, struck: 1 } },
+    { name: 'shared * switched off by a record property: still shown, struck', roles: [['Role 3', 'N']], op: 'Op5',
+      conds: [{ name: 'IsLeased', values: ['Y'] }], entity: { IsLeased: 'F' }, exp: { rows: 4, cols: 3, struck: 1 } }
   ];
   const runCompact = (tc) => {
     const savedRoles = userRoles.splice(0, userRoles.length, ...mkRoles(tc.roles)), savedAll = { ...sheetShowAll };
     try {
-      const b = bigBlock(tc.conds), t = evaluate(b, tc.op, userRoles, 'R', tc.entity || {});
+      const b = bigBlock(tc.conds, tc.extraCols), t = evaluate(b, tc.op, userRoles, 'R', tc.entity || {});
       const count = (panel) => {
-        const tbl = panel.querySelector('table.sheet');
+        const tbl = panel.querySelector('table.sheet'), stopTd = tbl.querySelector('td.cell-stop');
         return { rows: tbl.rows.length, cols: tbl.rows[0].cells.length, read: tbl.querySelectorAll('.cell-read').length,
-          stop: tbl.querySelectorAll('.cell-stop').length, struck: tbl.querySelectorAll('th.col-unmatched').length };
+          stop: tbl.querySelectorAll('.cell-stop').length, struck: tbl.querySelectorAll('th.col-unmatched').length,
+          stopCol: stopTd ? tbl.rows[0].cells[stopTd.cellIndex].textContent : null };
       };
       sheetShowAll.rows = sheetShowAll.cols = false;
       const small = count(buildSheetPanel(b, tc.op, t));
       sheetShowAll.rows = sheetShowAll.cols = true;
       const full = count(buildSheetPanel(b, tc.op, t));
       const ok = small.rows === tc.exp.rows && small.cols === tc.exp.cols && small.struck === tc.exp.struck
-        && small.read > 0 && small.read === full.read && small.stop === full.stop;
+        && small.read > 0 && small.read === full.read && small.stop === full.stop
+        && (!tc.exp.stopCol || small.stopCol === tc.exp.stopCol);
       return { ok, detail: `compact ${JSON.stringify(small)} vs full ${JSON.stringify(full)}` };
     } finally {
       userRoles.splice(0, userRoles.length, ...savedRoles);
       Object.assign(sheetShowAll, savedAll);
+    }
+  };
+
+  // "Open <child> in Trace" → "← Back": Back restores the parent row and Trace's own record property values
+  // (dropdowns are restored by position, after drillIntoMatrixCell has loaded the Role Matrix's values), and
+  // the user picking another record ends the round trip. Drives the real UI, so every piece of state it
+  // touches is put back afterwards.
+  const backCase = () => {
+    if (!parsed || !parsed.Entities) return { ok: false, detail: 'needs a loaded workbook (demo or upload)' };
+    const E = parsed.Entities;
+    // roles: the same objects, not copies — the role inputs on the left are bound to these objects.
+    const saved = { roles: userRoles.slice(), site: siteLevelDefault, sheet: currentSheet, block: $('block').value,
+      op: $('operation').value, state: { ...entityState }, ret: traceReturn };
+    const P = makeBlock('ZzBackParent', '', ['Role A'], ['M'], [{ name: 'CreateZzKid', values: ['F'] }, { name: 'RemoveZzKid', values: ['F'] }],
+      [{ name: 'IsA', values: ['Y'] }, { name: 'IsB', values: ['N'] }]);
+    const C = makeBlock('ZzKid', '', ['Role A'], ['R'], []);
+    E.push(P, C);
+    const pi = E.indexOf(P), mKey = matrixBlockKey('Entities', pi);
+    try {
+      selectSheet('Entities'); // the block list must include P (a drill skips rebuilding an unchanged list)
+      userRoles.splice(0, userRoles.length, { name: 'Role A', defaultPermission: 'X' });
+      siteLevelDefault = 'R';
+      getMatrixConditions('Entities', pi).IsA = 'F'; // the Role Matrix holds a different value for P
+      drillIntoMatrixCell('Entities', pi, 'CreateZzKid');
+      entityState = { IsA: 'T', IsB: 'F' }; // Trace's own values
+      const sels = $('conditionList').querySelectorAll('select'); sels[0].value = 'T'; sels[1].value = 'F';
+      runEvaluate();
+      const out = $('output');
+      const btn = re => [...out.querySelectorAll('button')].find(b => re.test(b.textContent));
+      btn(/^Open ZzKid/).click();
+      const onChild = currentBlock === C && !!btn(/^← Back/);
+      btn(/^← Back/).click();
+      const want = evaluate(P, 'CreateZzKid', userRoles, siteLevelDefault, { IsA: 'T', IsB: 'F' }).final;
+      const badge = (out.querySelector('.final-badge').textContent.match(/[FMRNX]/) || [''])[0];
+      const dropdowns = [...$('conditionList').querySelectorAll('select')].map(s => s.value).join(',');
+      const backOn = currentBlock === P ? 'parent' : currentBlock ? currentBlock.identifier : 'none', props = JSON.stringify(entityState);
+      const restored = backOn === 'parent' && $('operation').value === 'CreateZzKid' && dropdowns === 'T,F'
+        && props === JSON.stringify({ IsA: 'T', IsB: 'F' }) && badge === want && want === 'F' && !btn(/^← Back/);
+      btn(/^Open ZzKid/).click();
+      const bs = $('block'); bs.value = '0'; bs.dispatchEvent(new Event('change'));
+      const cleared = traceReturn === null && !btn(/^← Back/);
+      return { ok: onChild && restored && cleared,
+        detail: `child shown with Back=${onChild}; after Back: on ${backOn}, dropdowns ${dropdowns}, state ${props}, badge ${badge} (want ${want}); record pick clears Back=${cleared}` };
+    } finally {
+      E.splice(E.indexOf(P), 2);
+      matrixConditionStates.delete(mKey);
+      userRoles.splice(0, userRoles.length, ...saved.roles);
+      siteLevelDefault = saved.site;
+      selectSheet(saved.sheet);
+      $('block').value = saved.block; selectBlock();
+      $('operation').value = saved.op;
+      entityState = saved.state; // selectBlock() cleared it and the dropdowns — put both back
+      const condSels = $('conditionList') ? $('conditionList').querySelectorAll('select') : [];
+      (currentBlock ? currentBlock.conditions : []).forEach((c, i) => { if (condSels[i]) condSels[i].value = saved.state[c.name] || ''; });
+      traceReturn = saved.ret;
+      $('output').innerHTML = '';
     }
   };
 
@@ -3576,7 +3643,8 @@ function runTests() {
     runGroup('Framework parity — which block is used', usageCases, runUsage),
     runGroup('Held-back marker — Matrix, Trace and Field View agree', markerCases, runMarker),
     runGroup('Child list — Add / Remove buttons need the child record too', childCases, tc => tc.custom ? tc.custom() : runChild(tc)),
-    runGroup('Trace sheet — compact view keeps every cell the answer used', compactCases, runCompact)
+    runGroup('Trace sheet — compact view keeps every cell the answer used', compactCases, runCompact),
+    runGroup('Trace — Open child / Back round trip', [{ name: 'Back restores the parent row and its record properties; picking another record ends it', custom: backCase }], tc => tc.custom())
   ];
   const tp = groups.reduce((s, g) => s + g.passed, 0);
   const tt = groups.reduce((s, g) => s + g.total, 0);
@@ -3724,6 +3792,7 @@ function setAllBlocksOpen(open) {
   body.querySelectorAll('details.matrix-block').forEach(blockEl => {
     if (blockEl.classList.contains('hidden')) return; // skip filtered-out blocks
     blockEl.open = open;
+    delete blockEl.dataset.searchOpened; // the user's choice now — the search won't close it
   });
 }
 
@@ -3806,6 +3875,8 @@ function renderMatrixBlock(block, sheetName, blockIdx) {
   });
   entityBadge.appendChild(pill);
   summary.appendChild(entityBadge);
+  // Opening / closing a block by hand makes it the user's; the search won't close it later.
+  summary.addEventListener('click', () => { delete wrap.dataset.searchOpened; });
   wrap.appendChild(summary);
 
   const bodyEl = document.createElement('div');
@@ -3903,7 +3974,7 @@ function refreshMatrixBlock(sheetName, blockIdx) {
   const existing = body.querySelector(sel);
   if (!existing) return;
   const fresh = renderMatrixBlock(block, sheetName, blockIdx);
-  fresh.open = existing.open;
+  fresh.open = existing.open; // no data-search-opened: changing a block's record properties makes it the user's
   existing.replaceWith(fresh);
   applyMatrixFilter();
 }
@@ -3936,9 +4007,15 @@ function applyMatrixFilter() {
     // of operation rows — crucial for Tasks blocks which usually have none.
     const entityVisible = (!q || blockId.includes(q)) && levels.has(entityPerm);
     blockEl.classList.toggle('hidden', !(anyRowVisible || entityVisible));
-    // Auto-open blocks whose operations match the search; otherwise leave the
-    // user's open/closed state alone so collapsed-by-default is preserved.
-    if (q && anyOpMatch) blockEl.open = true;
+    // Auto-open blocks whose operations match the search, and close them again once they stop matching
+    // (or the search is cleared). Blocks the user opened themselves are never touched: only those the
+    // search opened carry data-search-opened, and the user toggling a block takes it over.
+    if (q && anyOpMatch) {
+      if (!blockEl.open) { blockEl.open = true; blockEl.dataset.searchOpened = '1'; }
+    } else if (blockEl.dataset.searchOpened) {
+      blockEl.open = false;
+      delete blockEl.dataset.searchOpened;
+    }
   });
 }
 
