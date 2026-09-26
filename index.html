@@ -2,10 +2,36 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
 <title>RBS Resolver — Odessa Framework permission visualizer</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+// Theme: resolved before first paint so a dark page never flashes white. The stored choice
+// ('light' | 'dark'; absent = follow the OS) is shared with SPEC.html via the same key.
+(function () {
+  var KEY = 'rbs-theme', mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var mem; // used only when storage is blocked, so the toggle still works for this page view
+  function stored() {
+    var v = mem;
+    try { v = localStorage.getItem(KEY); } catch (e) {}
+    return v === 'light' || v === 'dark' ? v : null;
+  }
+  function apply() { document.documentElement.dataset.theme = stored() || (mq.matches ? 'dark' : 'light'); }
+  apply();
+  if (mq.addEventListener) mq.addEventListener('change', apply); else if (mq.addListener) mq.addListener(apply);
+  window.rbsTheme = {
+    get: function () { return stored() || 'system'; },
+    set: function (v) {
+      mem = v === 'light' || v === 'dark' ? v : null;
+      try { if (mem) localStorage.setItem(KEY, mem); else localStorage.removeItem(KEY); } catch (e) {}
+      apply();
+    },
+    apply: apply
+  };
+})();
+</script>
 <style>
 :root {
+  color-scheme: light;
   --bg: #f7f8fa;
   --panel: #ffffff;
   --border: #d6dae0;
@@ -13,16 +39,121 @@
   --muted: #5f6470;
   --accent: #2563eb;
   --accent-soft: #dbeafe;
+  --accent-fill: #2563eb;   /* filled buttons / active tabs (text on it is --on-accent) */
+  --on-accent: #ffffff;
   --warning-bg: #fff4e5;
   --warning-border: #f59e0b;
   --warning-text: #92400e;
+  --success: #059669;
+  --success-fill: #059669;   /* badge background; text on it is --on-accent */
+  --success-ring: #05966933;
+  --danger: #dc2626;
+
+  --surface-input: #ffffff;  /* inputs, selects, secondary buttons, tabs, option cards */
+  --surface-2: #f0f2f5;      /* table headers, inline code, formula */
+  --surface-3: #eef1f5;      /* steps-key table header */
+  --surface-sunken: #fafbfc; /* row-name cells, test results, advisor role blocks */
+  --surface-sunken-2: #f8fafc;
+  --surface-cond: #f5f5f7;
+  --surface-cond-cell: #fafafb;
+
+  --tint-info: #f8fafd;
+  --tint-info-strong: #eff6ff;
+  --tint-info-border: #bfdbfe;
+  --tint-perm-bg: #dbeafe;
+  --tint-perm-text: #1e40af;
+  --tint-op-active: #fef3c7;
+  --tint-success: #f0fdf4;
+  --tint-success-border: #bbf7d0;
+  --tint-fallback: #fffbeb;
+  --tint-fallback-border: #d97706;
+  --tint-violet: #faf5ff;
+  --tint-violet-border: #a78bfa;
+  --tint-neutral-border: #94a3b8;
+
+  --tooltip-bg: #1e293b;
+  --tooltip-fg: #ffffff;
+  --shadow: rgba(0,0,0,.07);
+  --shadow-strong: rgba(0,0,0,.2);
+  --hatch: rgba(0,0,0,.07);
+  --hover-filter: brightness(0.92);
 
   --F: #D8E4BC;
   --M: #FFF2CC;
   --R: #FCD5B4;
   --N: #DA9694;
   --X: #F0F0F0;
+  --N-fg: #ffffff;           /* F/M/R inherit the text colour in light; dark sets --F/M/R-fg */
+  --X-fg: var(--muted);
 }
+/* Dark theme. Slate surfaces; the permission colours keep the spreadsheet's hues (green / yellow /
+   orange / red / grey) as deep variants with light text so they stay recognisable and readable. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1216;
+  --panel: #171b21;
+  --border: #323a46;
+  --text: #e4e7eb;
+  --muted: #9ba4b0;
+  --accent: #79aefd;
+  --accent-soft: #1b2a44;
+  --accent-fill: #2563eb;
+  --on-accent: #ffffff;
+  --warning-bg: #2a2011;
+  --warning-border: #c98a1e;
+  --warning-text: #f3c57a;
+  --success: #34c38f;
+  --success-fill: #047857;
+  --success-ring: #34c38f40;
+  --danger: #f87171;
+
+  --surface-input: #1d222a;
+  --surface-2: #222831;
+  --surface-3: #222831;
+  --surface-sunken: #1a1f26;
+  --surface-sunken-2: #1a1f26;
+  --surface-cond: #1c2027;
+  --surface-cond-cell: #191d23;
+
+  --tint-info: #19202a;
+  --tint-info-strong: #1a2536;
+  --tint-info-border: #2f4a75;
+  --tint-perm-bg: #1c2b46;
+  --tint-perm-text: #a9c8ff;
+  --tint-op-active: #3a3014;
+  --tint-success: #13261d;
+  --tint-success-border: #24503a;
+  --tint-fallback: #2a2112;
+  --tint-fallback-border: #d99a2b;
+  --tint-violet: #221c33;
+  --tint-violet-border: #9b7ef5;
+  --tint-neutral-border: #64748b;
+
+  --tooltip-bg: #2b3340;
+  --tooltip-fg: #f1f3f5;
+  --shadow: rgba(0,0,0,.45);
+  --shadow-strong: rgba(0,0,0,.6);
+  --hatch: rgba(255,255,255,.09);
+  --hover-filter: brightness(1.22);
+
+  --F: #2e4520;
+  --M: #463b10;
+  --R: #4b2d15;
+  --N: #582426;
+  --X: #252a32;
+  --F-fg: #d7e9bf;
+  --M-fg: #f7e3a1;
+  --R-fg: #f9cfa9;
+  --N-fg: #f5c6c4;
+  --X-fg: var(--muted);
+}
+/* Native controls with no explicit colours of their own (role rows, matrix search) would otherwise
+   use the browser's dark field colours. Zero specificity, so any class rule still wins. */
+:where(:root[data-theme="dark"]) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea) {
+  background-color: var(--surface-input);
+  color: var(--text);
+}
+:where(:root[data-theme="dark"]) :where(button) { color: var(--text); }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
@@ -62,6 +193,14 @@ header.app .links a:hover {
   border-bottom-color: var(--accent);
 }
 header.app .links .arrow { font-size: 10px; margin-left: 2px; }
+header.app .links { align-items: center; }
+.theme-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface-input); }
+.theme-toggle button { background: transparent; border: none; padding: 3px 9px; font: inherit; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.theme-toggle button + button { border-left: 1px solid var(--border); }
+.theme-toggle button[aria-checked="true"] { background: var(--accent-fill); color: var(--on-accent); }
+.theme-toggle button:not([aria-checked="true"]):hover { background: var(--accent-soft); color: var(--accent); }
+/* Two-ring inset focus: visible on the selected (filled) option too, where an accent outline would vanish. */
+.theme-toggle button:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 4px var(--surface-input); }
 .layout {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -78,7 +217,7 @@ header.app .links .arrow { font-size: 10px; margin-left: 2px; }
 #actionPanel {
   position: sticky;
   bottom: 0;
-  box-shadow: 0 -6px 16px rgba(0,0,0,.07);
+  box-shadow: 0 -6px 16px var(--shadow);
 }
 .panel {
   background: var(--panel);
@@ -127,22 +266,22 @@ header.app .links .arrow { font-size: 10px; margin-left: 2px; }
   font: inherit;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: white;
+  background: var(--surface-input);
 }
 .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
 .tab {
   padding: 6px 12px;
-  background: white;
+  background: var(--surface-input);
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
   font: inherit;
   flex: 1;
 }
-.tab.active { background: var(--accent); border-color: var(--accent); color: white; }
+.tab.active { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 button.primary {
-  background: var(--accent);
-  color: white;
+  background: var(--accent-fill);
+  color: var(--on-accent);
   border: none;
   padding: 9px 16px;
   border-radius: 4px;
@@ -153,7 +292,7 @@ button.primary {
 }
 button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 button.secondary {
-  background: white;
+  background: var(--surface-input);
   color: var(--text);
   border: 1px solid var(--border);
   padding: 7px 12px;
@@ -185,7 +324,7 @@ button.secondary:hover { border-color: var(--accent); color: var(--accent); }
   color: var(--muted);
   height: 26px;
 }
-.role-row .remove:hover { color: #dc2626; border-color: #dc2626; }
+.role-row .remove:hover { color: var(--danger); border-color: var(--danger); }
 .banner {
   background: var(--warning-bg);
   border: 1px solid var(--warning-border);
@@ -220,7 +359,7 @@ button.secondary:hover { border-color: var(--accent); color: var(--accent); }
   font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
   font-size: 12px;
   margin: 4px 0 8px;
-  background: #f0f2f5;
+  background: var(--surface-2);
   padding: 6px 10px;
   border-radius: 4px;
   display: inline-block;
@@ -243,7 +382,7 @@ table.sheet th, table.sheet td {
   vertical-align: middle;
 }
 table.sheet th {
-  background: #f0f2f5;
+  background: var(--surface-2);
   font-weight: 600;
   font-family: inherit;
   white-space: nowrap;
@@ -253,15 +392,18 @@ table.sheet th.identifier { text-align: left; }
 table.sheet td.row-name {
   text-align: left;
   font-family: inherit;
-  background: #fafbfc;
+  background: var(--surface-sunken);
   font-weight: 500;
   white-space: nowrap;
 }
 .cell-F { background: var(--F); }
 .cell-M { background: var(--M); }
 .cell-R { background: var(--R); }
-.cell-N { background: var(--N); color: white; }
-.cell-X { background: var(--X); color: var(--muted); }
+.cell-N { background: var(--N); color: var(--N-fg); }
+.cell-X { background: var(--X); color: var(--X-fg); }
+:root[data-theme="dark"] .cell-F { color: var(--F-fg); }
+:root[data-theme="dark"] .cell-M { color: var(--M-fg); }
+:root[data-theme="dark"] .cell-R { color: var(--R-fg); }
 /* read: cell was looked at during the cascade but didn't stop it.
    Soft dashed outline — "visited but moved on". */
 .cell-read {
@@ -304,10 +446,10 @@ table.sheet td.row-name {
 /* The two states can co-exist on a single cell (the "stop" cell is
    always also a "read" cell). Stop styling wins. */
 .cell-stop.cell-read { outline: 3px solid var(--accent); }
-.row-perm td.row-name { background: #dbeafe; color: #1e40af; }
-.row-cond td.row-name { font-style: italic; color: var(--muted); background: #f5f5f7; }
-.row-cond td { background: #fafafb; color: var(--muted); }
-.row-op-active td.row-name { background: #fef3c7; }
+.row-perm td.row-name { background: var(--tint-perm-bg); color: var(--tint-perm-text); }
+.row-cond td.row-name { font-style: italic; color: var(--muted); background: var(--surface-cond); }
+.row-cond td { background: var(--surface-cond-cell); color: var(--muted); }
+.row-op-active td.row-name { background: var(--tint-op-active); }
 .col-unmatched { opacity: 0.4; text-decoration: line-through; }
 .cell-unmatched { opacity: 0.45; }
 .scroll-x { overflow-x: auto; padding-bottom: 4px; }
@@ -319,13 +461,13 @@ table.sheet td.row-name {
   border-left: 3px solid var(--accent);
   padding: 10px 14px;
   margin-bottom: 12px;
-  background: #f8fafd;
+  background: var(--tint-info);
   border-radius: 0 4px 4px 0;
 }
-.role-trace.group-b { border-left-color: #94a3b8; background: #f8fafc; }
-.role-trace.common { border-left-color: #a78bfa; background: #faf5ff; }
+.role-trace.group-b { border-left-color: var(--tint-neutral-border); background: var(--surface-sunken-2); }
+.role-trace.common { border-left-color: var(--tint-violet-border); background: var(--tint-violet); }
 .steps-key {
-  background: #f8fafc;
+  background: var(--surface-sunken-2);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0;
@@ -366,7 +508,7 @@ table.sheet td.row-name {
 }
 .steps-key table th {
   font-weight: 600;
-  background: #eef1f5;
+  background: var(--surface-3);
   font-family: inherit;
   white-space: nowrap;
 }
@@ -406,16 +548,16 @@ table.sheet td.row-name {
 .test-results {
   font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
   font-size: 12px;
-  background: #fafbfc;
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 10px;
 }
-.test-results .pass { color: #059669; }
-.test-results .fail { color: #dc2626; font-weight: 700; }
+.test-results .pass { color: var(--success); }
+.test-results .fail { color: var(--danger); font-weight: 700; }
 .test-results .summary { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); font-weight: 600; }
 code.inline {
-  background: #f0f2f5;
+  background: var(--surface-2);
   padding: 1px 5px;
   border-radius: 3px;
   font-size: 12px;
@@ -423,18 +565,18 @@ code.inline {
 .muted-note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
 
 /* ── Tooltip (pure CSS, ? trigger) ───────────────────────── */
-.tip { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#eff6ff; color:var(--accent); font-size:10px; font-weight:700; cursor:help; position:relative; vertical-align:middle; margin-left:4px; border:1px solid #bfdbfe; flex-shrink:0; }
-.tip::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); background:#1e293b; color:white; padding:6px 10px; border-radius:6px; font-size:12px; width:230px; white-space:normal; opacity:0; transition:opacity .15s; z-index:100; pointer-events:none; line-height:1.5; text-align:left; box-shadow:0 4px 12px rgba(0,0,0,.2); }
-.tip::before { content:''; position:absolute; bottom:calc(100% + 1px); left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:#1e293b; opacity:0; transition:opacity .15s; z-index:101; pointer-events:none; }
+.tip { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:var(--tint-info-strong); color:var(--accent); font-size:10px; font-weight:700; cursor:help; position:relative; vertical-align:middle; margin-left:4px; border:1px solid var(--tint-info-border); flex-shrink:0; }
+.tip::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); background:var(--tooltip-bg); color:var(--tooltip-fg); padding:6px 10px; border-radius:6px; font-size:12px; width:230px; white-space:normal; opacity:0; transition:opacity .15s; z-index:100; pointer-events:none; line-height:1.5; text-align:left; box-shadow:0 4px 12px var(--shadow-strong); }
+.tip::before { content:''; position:absolute; bottom:calc(100% + 1px); left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:var(--tooltip-bg); opacity:0; transition:opacity .15s; z-index:101; pointer-events:none; }
 .tip:hover::after, .tip:hover::before, .tip:focus::after, .tip:focus::before { opacity:1; }
 
 
 /* ── Narrative trace output ───────────────────────────────── */
 .narrative-trace { font-size: 13px; line-height: 1.7; }
-.story-block { padding: 10px 14px; margin-bottom: 8px; border-radius: 6px; background: #f8fafd; border-left: 3px solid var(--border); }
-.story-block.is-stop { border-left-color: var(--accent); background: #eff6ff; }
-.story-block.is-circuit { border-left-color: #059669; background: #f0fdf4; }
-.story-block.is-fallback { border-left-color: #d97706; background: #fffbeb; }
+.story-block { padding: 10px 14px; margin-bottom: 8px; border-radius: 6px; background: var(--tint-info); border-left: 3px solid var(--border); }
+.story-block.is-stop { border-left-color: var(--accent); background: var(--tint-info-strong); }
+.story-block.is-circuit { border-left-color: var(--success); background: var(--tint-success); }
+.story-block.is-fallback { border-left-color: var(--tint-fallback-border); background: var(--tint-fallback); }
 .story-outcome { margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
 .perm-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; }
 
@@ -445,7 +587,7 @@ code.inline {
 .dropzone.busy:hover { border-color: var(--border); background: transparent; color: var(--muted); }
 
 /* ── Compact file strip (shown after workbook loads) ─────── */
-.file-strip { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 12px; }
+.file-strip { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--tint-success); border: 1px solid var(--tint-success-border); border-radius: 6px; font-size: 12px; }
 .file-strip-icon { font-size: 14px; flex-shrink: 0; }
 .file-strip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; font-weight: 600; }
 .file-strip-change { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; color: var(--muted); cursor: pointer; flex-shrink: 0; }
@@ -463,17 +605,17 @@ code.inline {
 .conditions-body { padding: 0 16px 14px; }
 
 /* ── Mode toggle (Role Matrix / Trace / Field View) ─────── */
-.mode-toggle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; width: fit-content; min-width: 280px; }
-.mode-toggle button { background: white; border: none; padding: 8px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.mode-toggle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface-input); width: fit-content; min-width: 280px; }
+.mode-toggle button { background: var(--surface-input); border: none; padding: 8px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
 .mode-toggle button + button { border-left: 1px solid var(--border); }
-.mode-toggle button.active { background: var(--accent); color: white; }
+.mode-toggle button.active { background: var(--accent-fill); color: var(--on-accent); }
 .mode-toggle button:not(.active):hover { background: var(--accent-soft); color: var(--accent); }
 
 /* ── Access matrix panel ──────────────────────────────────── */
 .matrix-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
 .matrix-filter-bar input.search { flex: 1; min-width: 180px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
 .matrix-chips { display: flex; gap: 4px; flex-wrap: wrap; }
-.matrix-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; font-size: 11px; font-weight: 600; user-select: none; background: white; }
+.matrix-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; font-size: 11px; font-weight: 600; user-select: none; background: var(--surface-input); }
 .matrix-chip.active { border-color: var(--accent); }
 .matrix-chip .sw { width: 10px; height: 10px; border: 1px solid var(--border); border-radius: 2px; display: inline-block; }
 .matrix-chip:not(.active) { opacity: 0.45; text-decoration: line-through; }
@@ -482,8 +624,8 @@ code.inline {
 .matrix-hint .hint-close { flex-shrink: 0; background: none; border: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; border-radius: 4px; }
 .matrix-hint .hint-close:hover { color: var(--accent); }
 .matrix-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
-.matrix-tab { padding: 6px 14px; background: white; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px; }
-.matrix-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
+.matrix-tab { padding: 6px 14px; background: var(--surface-input); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px; }
+.matrix-tab.active { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 .matrix-block { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; }
 .matrix-block summary { cursor: pointer; padding: 10px 14px; list-style: none; display: flex; align-items: center; gap: 10px; user-select: none; font-weight: 600; font-size: 13px; }
 .matrix-block summary::-webkit-details-marker { display: none; }
@@ -493,22 +635,22 @@ code.inline {
 .matrix-block .badge-counts { margin-left: auto; display: flex; gap: 4px; }
 .matrix-block .badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; border: 1px solid var(--border); }
 .matrix-block .entity-pill { cursor: pointer; padding: 3px 10px; font-size: 12px; transition: filter .15s, outline-color .15s; outline: 2px solid transparent; outline-offset: -2px; }
-.matrix-block .entity-pill:hover { filter: brightness(0.92); outline-color: var(--accent); }
+.matrix-block .entity-pill:hover { filter: var(--hover-filter); outline-color: var(--accent); }
 .matrix-block .block-body { padding: 4px 14px 12px; }
-.matrix-conditions { display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 10px; margin-bottom: 8px; background: #f8fafc; border: 1px dashed var(--border); border-radius: 4px; font-size: 12px; }
+.matrix-conditions { display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 10px; margin-bottom: 8px; background: var(--surface-sunken-2); border: 1px dashed var(--border); border-radius: 4px; font-size: 12px; }
 .matrix-conditions .mc-cell { display: flex; align-items: center; gap: 6px; }
 .matrix-conditions .mc-cell label { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; color: var(--muted); }
-.matrix-conditions select { padding: 3px 6px; font: inherit; font-size: 12px; border: 1px solid var(--border); border-radius: 3px; background: white; }
+.matrix-conditions select { padding: 3px 6px; font: inherit; font-size: 12px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface-input); }
 .matrix-rows { display: grid; grid-template-columns: 1fr auto; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .matrix-row { display: contents; }
-.matrix-row > .op-name { background: #fafbfc; padding: 6px 10px; font-size: 12px; }
+.matrix-row > .op-name { background: var(--surface-sunken); padding: 6px 10px; font-size: 12px; }
 .matrix-row > .matrix-perm { padding: 6px 12px; text-align: center; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-weight: 700; cursor: pointer; user-select: none; min-width: 56px; transition: filter .15s; }
-.matrix-row > .matrix-perm:hover { filter: brightness(0.92); outline: 2px solid var(--accent); outline-offset: -2px; }
+.matrix-row > .matrix-perm:hover { filter: var(--hover-filter); outline: 2px solid var(--accent); outline-offset: -2px; }
 .matrix-row > .matrix-perm[title]:hover::after { /* tooltip handled by native title */ }
 /* Field allows more than its record does: the letter stays the spreadsheet value; hatching + 🔒 flag
    the cap. Shared by Role Matrix cells, the Trace badge and the Field View result chip. Declared after
    the .cell-* rules so their `background` shorthand doesn't clear the hatching. */
-.capped { background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0,0,0,.07) 6px 8px); }
+.capped { background-image: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 8px); }
 .cap-mark { font-size: 10px; font-weight: 400; margin-left: 4px; }
 .final-badge.capped { position: relative; }
 .final-badge .cap-mark { position: absolute; top: 6px; right: 8px; font-size: 16px; margin: 0; }
@@ -528,7 +670,7 @@ button.matrix-export { margin-left: auto; }
 .fc-summary-link:hover .perm-chip { outline: 2px solid var(--accent); outline-offset: 1px; }
 table.fc-table { border-collapse: collapse; width: 100%; font-size: 12px; }
 table.fc-table th, table.fc-table td { border: 1px solid var(--border); padding: 5px 10px; vertical-align: middle; }
-table.fc-table th { background: #f0f2f5; font-weight: 600; text-align: left; white-space: nowrap; }
+table.fc-table th { background: var(--surface-2); font-weight: 600; text-align: left; white-space: nowrap; }
 table.fc-table td.fc-perm { text-align: center; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-weight: 700; min-width: 40px; }
 table.fc-table td.fc-role { font-weight: 500; white-space: nowrap; }
 table.fc-table td.fc-via { font-size: 11px; color: var(--muted); font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
@@ -536,19 +678,19 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 .fc-advisor { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
 .fc-advisor h2 { font-size: 13px; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
 .advisor-intro { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
-.fc-role-block { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; background: #fafbfc; }
+.fc-role-block { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; background: var(--surface-sunken); }
 .fc-role-block-hdr { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .fc-reco-note { font-size: 12px; color: var(--muted); font-style: italic; margin: 0 12px 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
 .fc-options { padding: 10px 12px 12px; }
-.fc-option { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; margin-bottom: 8px; align-items: start; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.fc-option { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; margin-bottom: 8px; align-items: start; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-input); }
 .fc-option:last-child { margin-bottom: 0; }
-.fc-option.fc-recommended { border-color: #059669; box-shadow: 0 0 0 1px #05966933; }
+.fc-option.fc-recommended { border-color: var(--success); box-shadow: 0 0 0 1px var(--success-ring); }
 .fc-option.fc-na { background: transparent; border-style: dashed; }
 .fc-option-letter { font-size: 13px; font-weight: 700; color: var(--accent); padding-top: 1px; text-align: center; }
-.fc-option-letter.fc-mark-do { color: #059669; }
+.fc-option-letter.fc-mark-do { color: var(--success); }
 .fc-option-letter.fc-mark-cond { color: var(--warning-border); }
 .fc-option-letter.fc-mark-na { color: var(--muted); }
-.fc-reco { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #fff; background: #059669; border-radius: 10px; padding: 1px 7px; margin-right: 6px; vertical-align: middle; }
+.fc-reco { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--on-accent); background: var(--success-fill); border-radius: 10px; padding: 1px 7px; margin-right: 6px; vertical-align: middle; }
 .fc-option-body { font-size: 12px; line-height: 1.6; }
 .fc-option-blast { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .fc-option.fc-na { opacity: 0.45; }
@@ -569,6 +711,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 .fc-more > .fc-role-block { margin-top: 8px; }
 
 </style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <header class="app">
@@ -579,9 +722,16 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
       and field. Upload your RBS workbook, pick a target, list the user's roles, and inspect the cascade.
     </div>
   </div>
-  <nav class="links" aria-label="Reference links">
-    <a href="./SPEC.html" target="_blank" rel="noopener" title="Open the verified algorithm spec, rendered as HTML">Algorithm spec<span class="arrow">↗</span></a>
-  </nav>
+  <div class="links">
+    <nav aria-label="Reference links">
+      <a href="./SPEC.html" target="_blank" rel="noopener" title="Open the verified algorithm spec, rendered as HTML">Algorithm spec<span class="arrow">↗</span></a>
+    </nav>
+    <div class="theme-toggle" id="themeToggle" role="radiogroup" aria-label="Colour theme">
+      <button type="button" role="radio" data-theme-choice="system" title="Follow your operating system's light or dark setting">System</button>
+      <button type="button" role="radio" data-theme-choice="light" title="Always use the light theme">Light</button>
+      <button type="button" role="radio" data-theme-choice="dark" title="Always use the dark theme">Dark</button>
+    </div>
+  </div>
 </header>
 <div class="layout">
   <div class="left">
@@ -1528,6 +1678,36 @@ $('loadDemo').addEventListener('click', () => {
   onLoaded();
 });
 
+// Theme toggle (System / Light / Dark) — an ARIA radio group: one tab stop, arrow keys move the
+// choice. The resolution itself (and the OS-change listener) lives in the <head> script.
+(function initThemeToggle() {
+  const group = $('themeToggle');
+  const radios = Array.from(group.querySelectorAll('[role="radio"]'));
+  const sync = () => {
+    const cur = window.rbsTheme.get();
+    radios.forEach(r => {
+      const on = r.dataset.themeChoice === cur;
+      r.setAttribute('aria-checked', on ? 'true' : 'false');
+      r.tabIndex = on ? 0 : -1;
+    });
+  };
+  const choose = (r, focus) => { window.rbsTheme.set(r.dataset.themeChoice); sync(); if (focus) r.focus(); };
+  radios.forEach(r => r.addEventListener('click', () => choose(r, false)));
+  group.addEventListener('keydown', e => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const i = radios.indexOf(document.activeElement);
+    choose(radios[(Math.max(i, 0) + step + radios.length) % radios.length], true);
+  });
+  // Another tab (e.g. SPEC.html, or a second copy of the app) changed the choice.
+  window.addEventListener('storage', e => { if (e.key === 'rbs-theme') { window.rbsTheme.apply(); sync(); } });
+  // Printers drop backgrounds, which would leave light-on-white text — always print the light theme.
+  window.addEventListener('beforeprint', () => { document.documentElement.dataset.theme = 'light'; });
+  window.addEventListener('afterprint', () => window.rbsTheme.apply());
+  sync();
+})();
+
 function onLoaded() {
   if (!parsed) return;
   $('systemPanel').style.display = '';
@@ -2088,8 +2268,8 @@ function buildSheetPanel(block, operationName, t) {
   legend.className = 'legend';
   legend.innerHTML =
     ['F','M','R','N','X'].map(p => `<span><span class="swatch cell-${p}"></span>${p} &mdash; ${PERM_NAME[p]}</span>`).join('') +
-    `<span><span class="swatch" style="background:white; outline:2px dashed var(--accent); outline-offset:-2px;"></span>read &mdash; visited, kept cascading</span>` +
-    `<span><span class="swatch" style="background:white; outline:3px solid var(--accent); outline-offset:-3px; position:relative; display:inline-block;"><span style="position:absolute; top:0; right:0; width:0; height:0; border-style:solid; border-width:0 6px 6px 0; border-color:transparent var(--accent) transparent transparent;"></span></span>stopped &mdash; returned this value</span>`;
+    `<span><span class="swatch" style="background:var(--panel); outline:2px dashed var(--accent); outline-offset:-2px;"></span>read &mdash; visited, kept cascading</span>` +
+    `<span><span class="swatch" style="background:var(--panel); outline:3px solid var(--accent); outline-offset:-3px; position:relative; display:inline-block;"><span style="position:absolute; top:0; right:0; width:0; height:0; border-style:solid; border-width:0 6px 6px 0; border-color:transparent var(--accent) transparent transparent;"></span></span>stopped &mdash; returned this value</span>`;
   panel.appendChild(legend);
   const wrap = document.createElement('div');
   wrap.className = 'scroll-x';
@@ -4054,7 +4234,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
   if (cRank === tRank) {
     const p = document.createElement('p');
     p.className = 'advisor-intro';
-    p.style.color = (recordShort || childShort) ? '' : '#059669';
+    p.style.color = (recordShort || childShort) ? '' : 'var(--success)';
     p.innerHTML = (recordShort || childShort)
       ? `In the spreadsheet this user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}, so nothing on this row needs changing — the change needed is on ${childShort ? `the ${escapeHtml(lim.child.name)} record` : 'the record'} (see above).`
       : `This user already gets exactly <strong>${combined.final} — ${PERM_NAME[combined.final]}</strong> on ${fieldLabelText}. Nothing to change.`;

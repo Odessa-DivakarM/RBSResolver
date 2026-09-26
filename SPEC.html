@@ -9,9 +9,27 @@
 <meta charset="utf-8">
 <title>RBS Resolver — Algorithm specification</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="https://cdn.jsdelivr.net/npm/marked@13.0.2/marked.min.js"></script>
+<meta name="color-scheme" content="light dark">
+<script>
+// Follows the theme chosen in the app (same 'rbs-theme' key; absent = follow the OS). Runs before
+// first paint so there is no white flash. Printing always uses the light theme.
+(function () {
+  var KEY = 'rbs-theme', mq = window.matchMedia('(prefers-color-scheme: dark)');
+  function apply() {
+    var v = null;
+    try { v = localStorage.getItem(KEY); } catch (e) {}
+    document.documentElement.dataset.theme = v === 'light' || v === 'dark' ? v : (mq.matches ? 'dark' : 'light');
+  }
+  apply();
+  if (mq.addEventListener) mq.addEventListener('change', apply); else if (mq.addListener) mq.addListener(apply);
+  window.addEventListener('storage', function (e) { if (e.key === KEY) apply(); });
+  window.addEventListener('beforeprint', function () { document.documentElement.dataset.theme = 'light'; });
+  window.addEventListener('afterprint', apply);
+})();
+</script>
 <style>
 :root {
+  color-scheme: light;
   --bg: #f7f8fa;
   --panel: #ffffff;
   --border: #d6dae0;
@@ -19,6 +37,18 @@
   --muted: #5f6470;
   --accent: #2563eb;
   --code-bg: #f0f2f5;
+  --danger: #dc2626;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1216;
+  --panel: #171b21;
+  --border: #323a46;
+  --text: #e4e7eb;
+  --muted: #9ba4b0;
+  --accent: #79aefd;
+  --code-bg: #222831;
+  --danger: #f87171;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -60,7 +90,7 @@ main.loading, main.error {
   color: var(--muted);
   padding-top: 80px;
 }
-main.error h2 { color: #dc2626; }
+main.error h2 { color: var(--danger); }
 main h1 {
   font-size: 26px;
   font-weight: 600;
@@ -127,7 +157,7 @@ main th, main td {
   vertical-align: top;
 }
 main th {
-  background: #f0f2f5;
+  background: var(--code-bg);
   font-weight: 600;
 }
 main blockquote {
@@ -139,6 +169,7 @@ main blockquote {
 }
 main strong { font-weight: 600; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked@13.0.2/marked.min.js"></script>
 </head>
 <body>
 <nav class="topbar">
