@@ -264,7 +264,7 @@ or `Modify`, so for fields and actions `F` and `M` behave identically.
 | Entity-level | Effect                                                                  |
 | ------------ | ----------------------------------------------------------------------- |
 | `F` / `M`    | Record editable; each field/action then limited by its own value (§7.1) |
-| `R`          | Record read-only — fields read-only, action buttons hidden              |
+| `R`          | Record read-only — fields read-only, actions unusable (see Actions, §7.1) |
 | `N` / `X`    | Entity not visible (every field hidden); grids show no columns; entity API read denied |
 
 Whether a form can be opened from a menu or command is mostly decided by the
@@ -308,18 +308,39 @@ field-level result, never one role column's values.
 | `R`          | **visible, read-only** | visible, read-only    | hidden          |
 | `N` / `X`    | hidden                | hidden                | hidden          |
 
-**Actions** follow the same table, but an action button that cannot be used is
-normally **hidden**, not greyed out: `ActionWidgetHtmlElementProperties.IsVisible
-= IsParentVisible && IsEnabled`. So "visible, read-only" means *hidden* for an
-action. One exception: in the Modern UI (`UserSession.IsModernized`) a form
-action whose **own row** is below `Modify` while the record is editable can show
-greyed out after the form's properties refresh
-(`CanActionWidgetDisplayedAsVisibleAndDisabled` → `AnyActionsDisabledAndVisible`;
-`prepareActionWidget` in `framework.uicontrols.js`). When the **record** is
-below `Modify` the whole form model is read-only
-(`AbstractEntryFormModel.IsReadOnly`), and every action helper returns false at
-`IsModelReadOnly`, so its action buttons are hidden in every UI. Grid buttons
-are always hidden when disabled.
+**Actions** follow the same table: an action can be used only where it says
+*editable*. How an unusable action looks:
+
+- **Normally hidden, not greyed out.** Every first render uses
+  `ActionWidgetHtmlElementProperties.IsVisible = IsParentVisible && IsEnabled`
+  (`_ActionWidget.cshtml`, `FormActionBar.cshtml`, the App serializer
+  `ActionFieldItem`). Grid buttons are hidden too — on first render
+  (`framework.grid.js`, `GridActionItem.IsVisible`) and on refresh
+  (`prepareGridActionWidget`).
+- **Modern UI** (`UserSession.IsModernized`): a form action that RBS shows (its
+  entity and row cover `Read`) but that can't be used can turn **greyed out** —
+  but only when the form re-sends its properties, and a refresh re-sends only
+  widgets whose state changed (`AbstractMetaFormModel.AppendHtmlPropertiesJson`
+  → `HtmlElementProperties.HasChangedFromLastCall`). So an action unusable from
+  the start stays hidden; one that becomes unusable while the form is open
+  (a conditional block, a behaviour rule) shows greyed
+  (`CanActionWidgetDisplayedAsVisibleAndDisabled` → `AnyActionsDisabledAndVisible`;
+  `prepareActionWidget` in `framework.uicontrols.js`).
+- **Form's own record below `Modify`**: the form model is read-only
+  (`AbstractEntryFormModel.IsReadOnly` → `HtmlElementProperties.IsModelReadOnly`),
+  so the entity-action helpers (PerformAction / OpenActionForm, workflow and
+  interim-save actions, list Create / Remove) return false — hidden in every UI.
+  This does not cover an action on a sub-entity (a dotted `PerformAction.Property`,
+  whose own record's `R` can grey it in the Modern UI as above), nor buttons that
+  run a `Command` or an `ExecuteTransactionAction`, which don't check
+  `IsModelReadOnly`. View and browse forms are never read-only models.
+- **XAML opt-in**: `PerformAction.AlwaysShowDisabledActionWidget="True"` shows
+  the button disabled from the first render in every UI, even on a read-only
+  record (`ShouldDisplayDisabledActionWidget`). Not used in Framework or Core
+  XAML.
+
+The visualizer can't tell which of these applies, so Trace says an unusable
+action is "usually hidden; some screens show it greyed out".
 
 Example (FRWK-25772): Permissions row `X`, role default `X`, site-level `R` → entity
 `R`; field row `F` → field value `F`, but the field is **read-only**. The visualizer
@@ -420,8 +441,11 @@ the action — the form's entity, or the one on the `PerformAction.Property` pat
 being read-only (`GridActionWidgetHtmlElementProperties.IsAccessible` →
 `AnyActionsVisibleAndEnabled`). The usual non-RBS gates still apply (panel
 visibility, behaviour `Enabled` / `Visible`). A grid button that runs a
-`Command` is gated by the Transactions sheet (`Command.IsAccessible`), one that
-runs an `ExecuteTransactionAction` by the transaction's `Modify`. The child
+`Command` is gated like that command (`Command.IsAccessible`: the Transactions
+sheet for transaction, browse and view commands, the Entities sheet for
+`OpenSite`, no check for other commands — see §7); one that runs an
+`ExecuteTransactionAction` by the transaction's `Modify`. Neither checks whether
+the form is read-only. The child
 entity's permission is **not** checked: with `AssetFeature` at `R`, Add is
 hidden but Delete is still shown and enabled. To block it, lower that action's
 row on the entity that owns it. The visualizer treats these rows as ordinary
@@ -473,11 +497,13 @@ Not flagged by the visualizer:
   whose parent also has an unrelated `Has<X>` row (for example a reference
   named `X`): it would be read as one-to-one and its child check dropped. Not
   seen in the measured workbook.
-- A grandchild collection bound on the root form (the binding entity is not
-  the grandchild's parent): its Create button is hidden outright, and its
-  Remove button skips the parent's `Remove<Child>` row — only the child's
-  `Modify`, `ShowRemoveAction` and the form not being read-only still apply
-  (`GridActionWidgetHtmlElementProperties.IsEnabled`, `return !isCreateAction`).
+- A list bound on an entity that is not its source entity's parent (e.g. a
+  grandchild collection bound on the root form): its Create button is hidden
+  outright, and its Remove button skips the parent's `Remove<Child>` row — only
+  the child's `Modify`, `ShowRemoveAction` and the form not being read-only still
+  apply (`GridActionWidgetHtmlElementProperties.IsEnabled`, `return !isCreateAction`).
+  On the MVC grid both buttons also need an editable grid that is not a sub-grid
+  (`_GridWidget.cshtml`).
 - Script-driven child edits (`ManipulationContext`), which check only the
   parent's `Create<Child>` action.
 

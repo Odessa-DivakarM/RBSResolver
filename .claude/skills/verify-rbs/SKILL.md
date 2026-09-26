@@ -2,7 +2,7 @@
 name: verify-rbs
 description: >-
   Launch the RBS Resolver app over HTTP and run its in-app test + smoke checks
-  (the ~97-assertion runTests() suite plus a three-mode smoke and a console-error
+  (the ~98-assertion runTests() suite plus a three-mode smoke and a console-error
   check). Use this whenever you need to confirm a change to index.html actually
   works — before deploying, after editing the resolver/advisor/Field-View code,
   when asked to "verify", "smoke test", "run the tests", "check the app still
@@ -25,7 +25,7 @@ cold start every time.
 
 A change passes verification only when all three hold:
 
-1. **`runTests()` reports `97 / 97 passed`** (or `N / N` — every group green). This
+1. **`runTests()` reports `98 / 98 passed`** (or `N / N` — every group green). This
    is the project's real regression suite: core `evaluate()` cases, the Field View
    `MAX(rows) == combined` invariant, and the advisor raise/lower reachability
    tests.
@@ -93,7 +93,7 @@ Keep it short and evidence-first:
 
 ```
 Verify RBS Resolver — <one line: what was checked>
-- Tests:   97 / 97 passed   (or list each FAIL line)
+- Tests:   98 / 98 passed   (or list each FAIL line)
 - Modes:   Role Matrix ✓  Trace ✓  Field View ✓
 - Console: clean   (or paste the error)
 - Drove:   <the specific change path you exercised, + what you observed>
