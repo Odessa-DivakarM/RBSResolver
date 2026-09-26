@@ -11,19 +11,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <script>
-// Follows the theme chosen in the app (same 'rbs-theme' key; absent = follow the OS). Runs before
-// first paint so there is no white flash. Printing always uses the light theme.
+// Theme, resolved before first paint so a dark page never flashes white. The SAME script is in
+// index.html and SPEC.html — keep the two copies identical. The saved choice ('light' | 'dark')
+// lives in localStorage['rbs-theme']; absent = follow the OS. Printing always uses the light theme.
 (function () {
-  var KEY = 'rbs-theme', mq = window.matchMedia('(prefers-color-scheme: dark)');
-  function apply() {
-    var v = null;
+  var KEY = 'rbs-theme', root = document.documentElement, mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var mem = null; // stands in for storage when it is blocked, so the button still works for this page view
+  function stored() {
+    var v = mem;
     try { v = localStorage.getItem(KEY); } catch (e) {}
-    document.documentElement.dataset.theme = v === 'light' || v === 'dark' ? v : (mq.matches ? 'dark' : 'light');
+    return v === 'light' || v === 'dark' ? v : null;
   }
+  function os() { return mq.matches ? 'dark' : 'light'; }
+  function apply() {
+    root.dataset.theme = stored() || os();
+    if (window.rbsTheme.onchange) window.rbsTheme.onchange(root.dataset.theme);
+  }
+  window.rbsTheme = {
+    onchange: null,
+    // Flip light <-> dark. Landing on the OS's own theme clears the saved choice, so the page goes
+    // back to following the OS rather than pinning it.
+    toggle: function () {
+      var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      mem = next === os() ? null : next;
+      try { if (mem) localStorage.setItem(KEY, mem); else localStorage.removeItem(KEY); } catch (e) {}
+      apply();
+    }
+  };
   apply();
   if (mq.addEventListener) mq.addEventListener('change', apply); else if (mq.addListener) mq.addListener(apply);
-  window.addEventListener('storage', function (e) { if (e.key === KEY) apply(); });
-  window.addEventListener('beforeprint', function () { document.documentElement.dataset.theme = 'light'; });
+  window.addEventListener('storage', function (e) { if (e.key === KEY) apply(); }); // changed in another tab
+  window.addEventListener('beforeprint', function () { root.dataset.theme = 'light'; });
   window.addEventListener('afterprint', apply);
 })();
 </script>
@@ -79,7 +97,13 @@ nav.topbar a:hover {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
-nav.topbar .right { font-size: 12px; color: var(--muted); }
+nav.topbar .right { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 14px; }
+/* Theme button (same in index.html and SPEC.html): shows the theme a click switches to. */
+.theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s; }
+.theme-btn:hover { color: var(--accent); border-color: var(--accent); }
+.theme-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-btn svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+:root[data-theme="dark"] .theme-btn .icon-moon, :root:not([data-theme="dark"]) .theme-btn .icon-sun { display: none; }
 main {
   max-width: 920px;
   margin: 32px auto 80px;
@@ -176,9 +200,26 @@ main strong { font-weight: 600; }
   <a href="./index.html">&larr; Back to RBS Resolver</a>
   <span class="right">
     <a href="./SPEC.md" download style="border:none;">Download .md</a>
+    <button type="button" class="theme-btn" id="themeToggle" aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>
   </span>
 </nav>
 <main id="content" class="loading">Loading specification&hellip;</main>
+<script>
+// Theme button: flips light <-> dark (resolution lives in the <head> script).
+(function () {
+  const btn = document.getElementById('themeToggle');
+  window.rbsTheme.onchange = t => {
+    const label = t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+  };
+  window.rbsTheme.onchange(document.documentElement.dataset.theme);
+  btn.addEventListener('click', () => window.rbsTheme.toggle());
+})();
+</script>
 <script>
 (function () {
   const root = document.getElementById('content');

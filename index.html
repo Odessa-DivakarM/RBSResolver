@@ -5,28 +5,38 @@
 <meta name="color-scheme" content="light dark">
 <title>RBS Resolver — Odessa Framework permission visualizer</title>
 <script>
-// Theme: resolved before first paint so a dark page never flashes white. The stored choice
-// ('light' | 'dark'; absent = follow the OS) is shared with SPEC.html via the same key.
+// Theme, resolved before first paint so a dark page never flashes white. The SAME script is in
+// index.html and SPEC.html — keep the two copies identical. The saved choice ('light' | 'dark')
+// lives in localStorage['rbs-theme']; absent = follow the OS. Printing always uses the light theme.
 (function () {
-  var KEY = 'rbs-theme', mq = window.matchMedia('(prefers-color-scheme: dark)');
-  var mem; // used only when storage is blocked, so the toggle still works for this page view
+  var KEY = 'rbs-theme', root = document.documentElement, mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var mem = null; // stands in for storage when it is blocked, so the button still works for this page view
   function stored() {
     var v = mem;
     try { v = localStorage.getItem(KEY); } catch (e) {}
     return v === 'light' || v === 'dark' ? v : null;
   }
-  function apply() { document.documentElement.dataset.theme = stored() || (mq.matches ? 'dark' : 'light'); }
-  apply();
-  if (mq.addEventListener) mq.addEventListener('change', apply); else if (mq.addListener) mq.addListener(apply);
+  function os() { return mq.matches ? 'dark' : 'light'; }
+  function apply() {
+    root.dataset.theme = stored() || os();
+    if (window.rbsTheme.onchange) window.rbsTheme.onchange(root.dataset.theme);
+  }
   window.rbsTheme = {
-    get: function () { return stored() || 'system'; },
-    set: function (v) {
-      mem = v === 'light' || v === 'dark' ? v : null;
+    onchange: null,
+    // Flip light <-> dark. Landing on the OS's own theme clears the saved choice, so the page goes
+    // back to following the OS rather than pinning it.
+    toggle: function () {
+      var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      mem = next === os() ? null : next;
       try { if (mem) localStorage.setItem(KEY, mem); else localStorage.removeItem(KEY); } catch (e) {}
       apply();
-    },
-    apply: apply
+    }
   };
+  apply();
+  if (mq.addEventListener) mq.addEventListener('change', apply); else if (mq.addListener) mq.addListener(apply);
+  window.addEventListener('storage', function (e) { if (e.key === KEY) apply(); }); // changed in another tab
+  window.addEventListener('beforeprint', function () { root.dataset.theme = 'light'; });
+  window.addEventListener('afterprint', apply);
 })();
 </script>
 <style>
@@ -194,13 +204,12 @@ header.app .links a:hover {
 }
 header.app .links .arrow { font-size: 10px; margin-left: 2px; }
 header.app .links { align-items: center; }
-.theme-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface-input); }
-.theme-toggle button { background: transparent; border: none; padding: 3px 9px; font: inherit; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
-.theme-toggle button + button { border-left: 1px solid var(--border); }
-.theme-toggle button[aria-checked="true"] { background: var(--accent-fill); color: var(--on-accent); }
-.theme-toggle button:not([aria-checked="true"]):hover { background: var(--accent-soft); color: var(--accent); }
-/* Two-ring inset focus: visible on the selected (filled) option too, where an accent outline would vanish. */
-.theme-toggle button:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 4px var(--surface-input); }
+/* Theme button (same in index.html and SPEC.html): shows the theme a click switches to. */
+.theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s; }
+.theme-btn:hover { color: var(--accent); border-color: var(--accent); }
+.theme-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-btn svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+:root[data-theme="dark"] .theme-btn .icon-moon, :root:not([data-theme="dark"]) .theme-btn .icon-sun { display: none; }
 .layout {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -726,11 +735,10 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
     <nav aria-label="Reference links">
       <a href="./SPEC.html" target="_blank" rel="noopener" title="Open the verified algorithm spec, rendered as HTML">Algorithm spec<span class="arrow">↗</span></a>
     </nav>
-    <div class="theme-toggle" id="themeToggle" role="radiogroup" aria-label="Colour theme">
-      <button type="button" role="radio" data-theme-choice="system" title="Follow your operating system's light or dark setting">System</button>
-      <button type="button" role="radio" data-theme-choice="light" title="Always use the light theme">Light</button>
-      <button type="button" role="radio" data-theme-choice="dark" title="Always use the dark theme">Dark</button>
-    </div>
+    <button type="button" class="theme-btn" id="themeToggle" aria-label="Switch theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>
   </div>
 </header>
 <div class="layout">
@@ -1678,34 +1686,17 @@ $('loadDemo').addEventListener('click', () => {
   onLoaded();
 });
 
-// Theme toggle (System / Light / Dark) — an ARIA radio group: one tab stop, arrow keys move the
-// choice. The resolution itself (and the OS-change listener) lives in the <head> script.
-(function initThemeToggle() {
-  const group = $('themeToggle');
-  const radios = Array.from(group.querySelectorAll('[role="radio"]'));
-  const sync = () => {
-    const cur = window.rbsTheme.get();
-    radios.forEach(r => {
-      const on = r.dataset.themeChoice === cur;
-      r.setAttribute('aria-checked', on ? 'true' : 'false');
-      r.tabIndex = on ? 0 : -1;
-    });
+// Theme button: flips light <-> dark. Resolution, OS/other-tab listeners and print handling
+// live in the <head> script.
+(function initThemeButton() {
+  const btn = document.getElementById('themeToggle');
+  window.rbsTheme.onchange = t => {
+    const label = t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
   };
-  const choose = (r, focus) => { window.rbsTheme.set(r.dataset.themeChoice); sync(); if (focus) r.focus(); };
-  radios.forEach(r => r.addEventListener('click', () => choose(r, false)));
-  group.addEventListener('keydown', e => {
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-    if (!step) return;
-    e.preventDefault();
-    const i = radios.indexOf(document.activeElement);
-    choose(radios[(Math.max(i, 0) + step + radios.length) % radios.length], true);
-  });
-  // Another tab (e.g. SPEC.html, or a second copy of the app) changed the choice.
-  window.addEventListener('storage', e => { if (e.key === 'rbs-theme') { window.rbsTheme.apply(); sync(); } });
-  // Printers drop backgrounds, which would leave light-on-white text — always print the light theme.
-  window.addEventListener('beforeprint', () => { document.documentElement.dataset.theme = 'light'; });
-  window.addEventListener('afterprint', () => window.rbsTheme.apply());
-  sync();
+  window.rbsTheme.onchange(document.documentElement.dataset.theme);
+  btn.addEventListener('click', () => window.rbsTheme.toggle());
 })();
 
 function onLoaded() {
