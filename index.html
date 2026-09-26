@@ -212,7 +212,9 @@ header.app .links { align-items: center; }
 :root[data-theme="dark"] .theme-btn .icon-moon, :root:not([data-theme="dark"]) .theme-btn .icon-sun { display: none; }
 .layout {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  /* minmax(0, …): a plain 1fr grows to fit its widest child, so a wide sheet table stretched the whole
+     page sideways instead of scrolling inside its own box. */
+  grid-template-columns: 360px minmax(0, 1fr);
   gap: 20px;
   padding: 20px 28px;
   align-items: start;
@@ -606,6 +608,13 @@ code.inline {
 .sheet-scroll table.sheet td.row-name { position: sticky; left: 0; z-index: 1; }
 .sheet-scroll table.sheet thead th.identifier { left: 0; z-index: 3; }
 .sheet-scroll table.sheet thead th.col-unmatched { opacity: 1; color: var(--muted); } /* see-through header would show rows under it */
+/* Name column width (see nameColWidth). A table cell ignores its own max-width, so the cap sits on a block
+   inside it — that also caps the column's min-content width. */
+table.sheet .name-clip { display: block; max-width: var(--name-w, 260px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.sheet th.identifier.resizable { position: relative; padding-right: 14px; }
+.sheet-scroll table.sheet thead th.identifier { position: sticky; }
+.name-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; touch-action: none; border-right: 2px solid var(--border); }
+.name-resize:hover, .name-resize.dragging, .name-resize:focus-visible { border-right-color: var(--accent); background: var(--accent-soft); outline: none; }
 .story-outcome { margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
 .perm-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; }
 
@@ -1759,7 +1768,7 @@ function renderTabs() {
     const btn = document.createElement('button');
     btn.className = 'tab' + (currentSheet === s ? ' active' : '');
     btn.textContent = `${s} (${parsed[s].length})`;
-    btn.addEventListener('click', () => selectSheet(s));
+    btn.addEventListener('click', () => { traceReturn = null; selectSheet(s); refreshTrace(); });
     tabs.appendChild(btn);
   }
 }
@@ -1790,7 +1799,9 @@ function selectSheet(s) {
   }
 }
 
-$('block').addEventListener('change', selectBlock);
+// The user picking a record themselves ends an "Open <child> in Trace" round trip (no stale Back link).
+$('block').addEventListener('change', () => { traceReturn = null; selectBlock(); refreshTrace(); });
+$('operation').addEventListener('change', () => refreshTrace());
 function selectBlock() {
   currentBlock = parsed[currentSheet][parseInt($('block').value, 10)] || null;
   const opSel = $('operation');
@@ -1840,6 +1851,7 @@ function renderConditions() {
       const v = e.target.value;
       if (v) entityState[c.name] = v;
       else delete entityState[c.name];
+      refreshTrace();
     });
     row.appendChild(sel);
     list.appendChild(row);
@@ -1852,7 +1864,16 @@ function addRoleRow() {
 }
 // Field View output depends on userRoles — refresh it live when roles change.
 // Touches only #fieldOutput (not the roles panel), so input focus is preserved while typing.
-function rolesChanged() { rolesUserModified = true; if (appMode === 'field' && currentBlock) runFieldCoverage(); }
+function rolesChanged(typing) { rolesUserModified = true; if (appMode === 'field' && currentBlock) runFieldCoverage(); refreshTrace(typing ? 150 : 0); }
+// A Trace result on screen always matches the inputs on the left: any change re-evaluates it.
+// Before the first Evaluate (empty state) or over the test results nothing is drawn. Typing waits for a
+// pause — with a large block fully expanded one redraw is ~100 ms, too slow for every keystroke.
+let traceRefreshTimer = 0;
+function refreshTrace(delayMs) {
+  clearTimeout(traceRefreshTimer);
+  const run = () => { if (appMode === 'single' && currentBlock && $('output').querySelector('.final-card')) runEvaluate(); };
+  if (delayMs > 0) traceRefreshTimer = setTimeout(run, delayMs); else run();
+}
 function renderRoles() {
   const list = $('roleList');
   list.innerHTML = '';
@@ -1864,7 +1885,7 @@ function renderRoles() {
     nameInput.value = r.name;
     nameInput.setAttribute('list', 'rolesList');
     nameInput.placeholder = 'role name';
-    nameInput.addEventListener('input', e => { r.name = e.target.value; rolesChanged(); });
+    nameInput.addEventListener('input', e => { r.name = e.target.value; rolesChanged(true); });
     row.appendChild(nameInput);
     const permSel = document.createElement('select');
     for (const p of ['F', 'M', 'R', 'N', 'X']) {
@@ -1893,7 +1914,11 @@ function runEvaluate() {
 }
 
 const siteSel = $('siteLevelDefault');
-if (siteSel) siteSel.addEventListener('change', e => { siteLevelDefault = e.target.value; });
+if (siteSel) siteSel.addEventListener('change', e => {
+  siteLevelDefault = e.target.value;
+  if (appMode === 'field' && currentBlock) runFieldCoverage();
+  refreshTrace();
+});
 
 // Mode toggle wiring
 $('modeSingleBtn').addEventListener('click', () => setAppMode('single'));
@@ -2355,7 +2380,7 @@ function buildChildPanel(lim, sheetBlocks) {
       const op = $('operation').value || '';
       traceReturn = { parsed, block: currentBlock, sheet: currentSheet, blockIdx: parseInt($('block').value, 10), op,
         state: { ...entityState }, label: currentBlock.identifier + (op ? ' › ' + op : '') };
-      drillIntoMatrixCell('Entities', idx, '');
+      drillIntoMatrixCell('Entities', idx, '', true);
     });
     const row = document.createElement('div');
     row.className = 'sheet-view-bar';
@@ -2494,15 +2519,74 @@ function sheetUsedColumns(block) {
   return block.roleColumns.filter(rc => rc.name === '*' || mine.has(rc.name));
 }
 
+// Trace sheet's first (name) column: row names can be very long (Ast_NtFrmLease_and_LoanFunding_and_…),
+// and at full length the frozen column eats most of the width. It is capped at a width the user can drag
+// (or double-click to fit / reset); longer names end in "…" with the full name on hover. Remembered per browser.
+const NAME_COL_DEFAULT = 260, NAME_COL_MIN = 60, NAME_COL_MAX = 1200;
+let nameColWidth = NAME_COL_DEFAULT;
+try { const w = parseInt(localStorage.getItem('rbs-trace-name-w'), 10); if (w >= NAME_COL_MIN && w <= NAME_COL_MAX) nameColWidth = w; } catch (e) {}
+
+function setNameColWidth(w) {
+  nameColWidth = Math.round(Math.min(NAME_COL_MAX, Math.max(NAME_COL_MIN, w)));
+  document.querySelectorAll('#output table.sheet').forEach(tb => tb.style.setProperty('--name-w', nameColWidth + 'px'));
+  document.querySelectorAll('#output .name-resize').forEach(h => h.setAttribute('aria-valuenow', String(nameColWidth)));
+  try { localStorage.setItem('rbs-trace-name-w', String(nameColWidth)); } catch (e) {}
+}
+
+function clipName(cell, text) {
+  const s = document.createElement('span');
+  s.className = 'name-clip';
+  s.textContent = text;
+  s.title = text;
+  cell.appendChild(s);
+}
+
+function nameResizer() {
+  const h = document.createElement('span');
+  h.className = 'name-resize';
+  h.tabIndex = 0;
+  h.setAttribute('role', 'separator');
+  h.setAttribute('aria-orientation', 'vertical');
+  h.setAttribute('aria-valuemin', String(NAME_COL_MIN));
+  h.setAttribute('aria-valuemax', String(NAME_COL_MAX));
+  h.setAttribute('aria-valuenow', String(nameColWidth));
+  h.setAttribute('aria-label', 'Resize the name column (drag, or use the arrow keys; double-click to fit)');
+  h.title = 'Drag to resize · double-click to fit the longest name';
+  h.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const startX = e.clientX, startW = nameColWidth;
+    h.setPointerCapture(e.pointerId);
+    h.classList.add('dragging');
+    const move = ev => setNameColWidth(startW + ev.clientX - startX);
+    const up = () => { h.classList.remove('dragging'); h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', up);
+    h.addEventListener('pointercancel', up);
+  });
+  // Fit the longest name in this table; if it already fits, go back to the default.
+  h.addEventListener('dblclick', () => {
+    const clips = h.closest('table').querySelectorAll('.name-clip');
+    const longest = Math.max(NAME_COL_MIN, ...[...clips].map(c => c.scrollWidth + 1));
+    setNameColWidth(nameColWidth >= Math.min(longest, NAME_COL_MAX) ? NAME_COL_DEFAULT : longest);
+  });
+  h.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    setNameColWidth(nameColWidth + (e.key === 'ArrowRight' ? 20 : -20));
+  });
+  return h;
+}
+
 function buildSheetTable(block, operationName, t, cols = block.roleColumns, ops = block.operations) {
   const readSet = t ? t.readCells : new Set();
   const stopSet = t ? t.stopCells : new Set();
   const stepMap = (t && t.stepNumbers) ? t.stepNumbers : new Map();
   const unmatched = new Set((t && t.unmatchedColumns || []).map(c => c.columnIndex));
   const tbl = document.createElement('table'); tbl.className = 'sheet';
+  tbl.style.setProperty('--name-w', nameColWidth + 'px');
   const thead = document.createElement('thead'); const trh = document.createElement('tr');
-  const thn = document.createElement('th'); thn.className = 'identifier';
-  thn.textContent = block.identifier; trh.appendChild(thn);
+  const thn = document.createElement('th'); thn.className = 'identifier resizable';
+  clipName(thn, block.identifier); thn.appendChild(nameResizer()); trh.appendChild(thn);
   // Only tag column index when the same role name appears more than once
   // (i.e. genuine duplicate-column case in conditional RBS).
   const nameCounts = {};
@@ -2520,7 +2604,7 @@ function buildSheetTable(block, operationName, t, cols = block.roleColumns, ops 
     const c = block.conditions[ci];
     const tr = document.createElement('tr'); tr.className = 'row-cond';
     const td0 = document.createElement('td'); td0.className = 'row-name';
-    td0.textContent = c.name + (t && t.entityState[c.name] ? ` = ${t.entityState[c.name]}` : ' = ?');
+    clipName(td0, c.name + (t && t.entityState[c.name] ? ` = ${t.entityState[c.name]}` : ' = ?'));
     tr.appendChild(td0);
     for (const rc of cols) {
       const td = document.createElement('td');
@@ -2533,7 +2617,7 @@ function buildSheetTable(block, operationName, t, cols = block.roleColumns, ops 
 
   if (block.permissions) {
     const tr = document.createElement('tr'); tr.className = 'row-perm';
-    const td0 = document.createElement('td'); td0.className = 'row-name'; td0.textContent = 'Permissions'; tr.appendChild(td0);
+    const td0 = document.createElement('td'); td0.className = 'row-name'; clipName(td0, 'Permissions'); tr.appendChild(td0);
     for (const rc of cols) {
       const v = block.permissions[rc.columnIndex] || 'X';
       const td = document.createElement('td');
@@ -2553,7 +2637,7 @@ function buildSheetTable(block, operationName, t, cols = block.roleColumns, ops 
     const tr = document.createElement('tr');
     const isActive = operationName && o.name === operationName;
     if (isActive) tr.classList.add('row-op-active');
-    const td0 = document.createElement('td'); td0.className = 'row-name'; td0.textContent = o.name; tr.appendChild(td0);
+    const td0 = document.createElement('td'); td0.className = 'row-name'; clipName(td0, o.name); tr.appendChild(td0);
     for (const rc of cols) {
       const v = o.values[rc.columnIndex] || 'X';
       const td = document.createElement('td');
@@ -3858,9 +3942,10 @@ function applyMatrixFilter() {
   });
 }
 
-function drillIntoMatrixCell(sheetName, blockIdx, operationName) {
+function drillIntoMatrixCell(sheetName, blockIdx, operationName, keepReturn) {
   const block = parsed[sheetName] && parsed[sheetName][blockIdx];
   if (!block) return;
+  if (!keepReturn) traceReturn = null; // only "Open <child> in Trace" keeps a way back
   // Switch to single mode first so panels are visible.
   setAppMode('single');
   // Repopulate Step 2 selects to point at this block + operation. The block list is only rebuilt when it
