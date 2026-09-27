@@ -3751,7 +3751,8 @@ function runTests() {
   const withParsed = (wb, fn) => { const saved = parsed; parsed = wb; try { return fn(); } finally { parsed = saved; } };
   const wb = (...blocks) => ({ Entities: blocks, Transactions: [], Tasks: [] });
   // Renders Field View for one synthetic block and returns its text, then puts the pane and state back.
-  const fieldView = (block, op, roles, site, sheetBlocks, click) => {
+  // Runs against its own workbook: the legend reads parsed, and the user's may have an M cell.
+  const fieldView = (block, op, roles, site, sheetBlocks, click) => withParsed(wb(...(sheetBlocks || [block])), () => {
     const host = $('fieldOutput'), savedHtml = host.innerHTML, savedRoles = userRoles.splice(0, userRoles.length, ...roles);
     const savedSite = siteLevelDefault, savedOp = $('operation').value, savedTarget = $('targetPerm').value;
     siteLevelDefault = site;
@@ -3768,7 +3769,7 @@ function runTests() {
       siteLevelDefault = savedSite; $('operation').value = savedOp; $('targetPerm').value = savedTarget;
       host.innerHTML = savedHtml;
     }
-  };
+  });
   const modifyCases = [
     { name: 'dropdowns offer no M: site default F/R/N, target F/R/N, role default F/R/N/X', custom: () => {
       const saved = userRoles.slice();
