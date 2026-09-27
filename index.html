@@ -818,6 +818,24 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
         </div>
       </div>
     </div>
+    <div class="panel" id="usersPanel">
+      <h2>Users from Odessa<span class="tip" tabindex="0" data-tip="A file made by scripts/export-users.ps1 (in the RBS Resolver repository) from your Odessa database: every user, the roles login gives them, each role's default access level and the site default. Pick a user to fill in who the user is. The file is read in this browser only and never uploaded.">?</span></h2>
+      <input type="file" id="usersFile" accept=".json,application/json" hidden>
+      <div id="usersEmpty">
+        <button class="secondary" id="loadUsers" style="width:100%;" title="Load a .rbs-users.json file made by scripts/export-users.ps1">Load users file (.json)</button>
+        <p class="muted-note" id="usersMsg">Optional. Fills in a user's roles and the site default for you.</p>
+      </div>
+      <div id="usersLoaded" hidden>
+        <div class="field">
+          <label for="userPick">Pick a user</label>
+          <input type="text" id="userPick" list="usersList" placeholder="Type a login or a name" autocomplete="off">
+          <datalist id="usersList"></datalist>
+        </div>
+        <div id="userNotes"></div>
+        <p class="muted-note" id="usersInfo"></p>
+        <button class="secondary" id="changeUsers" title="Load a different users file">Load another file</button>
+      </div>
+    </div>
     <div class="panel" id="systemPanel" style="display:none;">
       <h2>System config</h2>
       <div class="field">
@@ -1614,6 +1632,9 @@ let entityState = {}; // { conditionName: 'T' | 'F' | undefined }
 // Access-matrix state
 let appMode = 'matrix'; // 'single' | 'matrix' | 'field'
 let rolesUserModified = false; // true once the user adds/removes/edits a role — gates Field View auto-fill
+let importedUsers = null;      // parseUserImport(...).data once a users file is loaded
+let importedUser = null;       // the picked user whose roles are on the left, until they're edited by hand
+let applyingImport = false;    // true while applyImportedUser itself triggers rolesChanged()
 let matrixSheet = 'Entities';
 const matrixConditionStates = new Map(); // key: `${sheet}:${blockIdx}` -> { [condName]: 'T' | 'F' }
 let matrixFilter = { text: '', levels: new Set(['F', 'M', 'R', 'N', 'X']) };
@@ -1837,7 +1858,7 @@ function onLoaded() {
   $('actionPanel').style.display = '';
   refreshRolesList();
   renderTabs();
-  rolesUserModified = false; // fresh workbook — re-enable Field View auto-fill
+  rolesUserModified = !!importedUser; // fresh workbook — re-enable Field View auto-fill, unless a user was picked
   if (userRoles.length === 0) addRoleRow();
   renderRoles();
   selectSheet('Entities');
@@ -1959,7 +1980,7 @@ function addRoleRow() {
 }
 // Field View output depends on userRoles — refresh it live when roles change.
 // Touches only #fieldOutput (not the roles panel), so input focus is preserved while typing.
-function rolesChanged(typing) { rolesUserModified = true; if (appMode === 'field' && currentBlock) runFieldCoverage(); refreshTrace(typing ? 150 : 0); }
+function rolesChanged(typing) { rolesUserModified = true; importEdited(); if (appMode === 'field' && currentBlock) runFieldCoverage(); refreshTrace(typing ? 150 : 0); }
 // A Trace result on screen always matches the inputs on the left: any change re-evaluates it.
 // Before the first Evaluate (empty state) or over the test results nothing is drawn. Typing waits for a
 // pause — with a large block fully expanded one redraw is ~100 ms, too slow for every keystroke.
@@ -2002,8 +2023,11 @@ function renderRoles() {
     }
     row.appendChild(nameWrap);
     const permSel = document.createElement('select');
-    // No M: a role's DefaultPermission can't be Modify (PermissionValues has only R / X / N / F).
-    for (const p of ['F', 'R', 'N', 'X']) {
+    // No M: a role's DefaultPermission can't be Modify (PermissionValues has only R / X / N / F) — unless a
+    // users file holds one ('m' is still read by Permission.Parse), which then gets its own option.
+    const codes = ['F', 'R', 'N', 'X'];
+    if (PERM_RANK[r.defaultPermission] !== undefined && !codes.includes(r.defaultPermission)) codes.splice(1, 0, r.defaultPermission);
+    for (const p of codes) {
       const opt = document.createElement('option');
       // X in a role's DB default means "use the site-level GP fallback", not an undefined value.
       opt.value = p; opt.textContent = `${p} — ${p === 'X' ? 'Site default' : PERM_NAME[p]}`;
@@ -2033,8 +2057,226 @@ function runEvaluate() {
 const siteSel = $('siteLevelDefault');
 if (siteSel) siteSel.addEventListener('change', e => {
   siteLevelDefault = e.target.value;
+  importEdited();
   if (appMode === 'field' && currentBlock) runFieldCoverage();
   refreshTrace();
+});
+
+// ============================================================
+// Users file (scripts/export-users.ps1 → rbs-users/1)
+// ============================================================
+// Lw.Sys.Model.Security.Permission.Parse, exactly (checked against the .NET Framework 4.8 runtime):
+//   blank (IsNullOrWhiteSpace) → X; one character → x / n / r / m / f in either case, anything else throws;
+//   longer → Enum.Parse(AccessMode, s, ignoreCase: true): trimmed; a leading digit / + / - means an Int32
+//   ([+-]?[0-9]+, else it throws); otherwise comma-separated names (ASCII case ignored), OR'd together;
+//   then ParseAccessMode throws for anything outside Undefined 0 · None 1 · Read 2 · Modify 3 · Full 4.
+// Returns a code, or null where the framework throws.
+// .NET's char.IsWhiteSpace set, which String.Trim and IsNullOrWhiteSpace use (JS \s and trim() differ: U+FEFF, U+0085).
+const NET_WS = '\u0009-\u000D \u0085   -     　';
+const NET_BLANK = new RegExp(`^[${NET_WS}]*$`), NET_TRIM = new RegExp(`^[${NET_WS}]+|[${NET_WS}]+$`, 'g');
+const netTrim = (s) => s.replace(NET_TRIM, '');
+const ACCESS_MODE = new Map([['undefined', 0], ['none', 1], ['read', 2], ['modify', 3], ['full', 4]]);
+const ACCESS_CODE = ['X', 'N', 'R', 'M', 'F'];
+function frameworkParsePermission(s) {
+  if (s == null || NET_BLANK.test(s)) return 'X';
+  if (s.length === 1) return ({ x: 'X', X: 'X', n: 'N', N: 'N', r: 'R', R: 'R', m: 'M', M: 'M', f: 'F', F: 'F' })[s] || null;
+  const t = netTrim(s);
+  let v;
+  if (/^[0-9+-]/.test(t)) {
+    if (!/^[+-]?[0-9]+$/.test(t)) return null;
+    v = Number(t);
+    if (v > 2147483647 || v < -2147483648) return null; // Int32 overflow
+  } else {
+    v = 0;
+    for (const part of t.split(',')) {
+      const k = netTrim(part);
+      if (!/^[A-Za-z]+$/.test(k) || !ACCESS_MODE.has(k.toLowerCase())) return null;
+      v |= ACCESS_MODE.get(k.toLowerCase());
+    }
+  }
+  return Number.isInteger(v) && v >= 0 && v <= 4 ? ACCESS_CODE[v] : null;
+}
+
+// Checks a users file and resolves what login would give each user. Pure: no DOM, no globals.
+// → { error } for a file that can't be used, else { data, warnings }.
+function parseUserImport(text) {
+  let doc;
+  try { doc = JSON.parse(text); } catch (e) { return { error: "This isn't a JSON file." }; }
+  if (!doc || doc.format !== 'rbs-users/1') {
+    return { error: 'This is not a users file from scripts/export-users.ps1 (expected format "rbs-users/1").' };
+  }
+  if (!Array.isArray(doc.roles) || !Array.isArray(doc.users)) return { error: 'The users file has no roles or users list.' };
+  const warnings = [];
+  // Site default: no row → "Full" (UserContextHelper.FetchUserRoles); otherwise parsed as stored.
+  const siteRaw = doc.siteLevelDefault;
+  const site = siteRaw == null ? 'F' : frameworkParsePermission(String(siteRaw));
+  if (siteRaw == null) warnings.push('The database has no active <code class="inline">UserRole.DefaultRolePermission</code> setting, so the site default is Full, as in Odessa.');
+  else if (site === null) warnings.push(`The site default is stored as <strong>“${escapeHtml(String(siteRaw))}”</strong>, which Odessa can't read, so no one can log in.`);
+  else if (site === 'X') warnings.push(`The site default is stored as <strong>“${escapeHtml(String(siteRaw))}”</strong>, which Odessa reads as Undefined: a role whose default is X then gives no access.`);
+  else if (site === 'M') warnings.push(`The site default is stored as <strong>“${escapeHtml(String(siteRaw))}”</strong>, which Odessa reads as Modify, a level that isn't otherwise used.`);
+  const roleDefaults = new Map(); // lower-case name → { name, raw, code } (role names are unique ignoring case: UK_RoleName)
+  for (const r of doc.roles) {
+    if (!r || typeof r.name !== 'string') continue;
+    const raw = r.defaultPermission == null ? '' : String(r.defaultPermission);
+    // PermissionValues.IsX is an exact 'X'; only that means "use the site default". A blank stored value
+    // becomes '_' (AbstractEnum.Value), which Permission.Parse can't read.
+    const code = NET_BLANK.test(raw) ? null : raw === 'X' ? 'X' : frameworkParsePermission(raw);
+    roleDefaults.set(r.name.toLowerCase(), { name: r.name, raw, code });
+  }
+  const users = doc.users.filter(u => u && u.id != null).map(u => {
+    const roles = [], blockers = [], notes = [];
+    for (const ur of (Array.isArray(u.roles) ? u.roles : [])) {
+      const name = ur && typeof ur.name === 'string' ? ur.name : null;
+      if (!name) continue;
+      const d = roleDefaults.get(name.toLowerCase());
+      if (!d) { blockers.push(`role “${escapeHtml(name)}” is missing from the file's role list`); continue; }
+      if (d.code === null) {
+        blockers.push(NET_BLANK.test(d.raw) ? `role “${escapeHtml(d.name)}” has a blank default, which Odessa can't read`
+          : `role “${escapeHtml(d.name)}” has a default Odessa can't read (“${escapeHtml(d.raw)}”)`);
+        continue;
+      }
+      // Undefined but not an exact 'X' (e.g. 'x', 'Undefined'): Odessa does not substitute the site default, and
+      // Undefined gives no access. In this tool X means "site default", so show it as N, which gives the same.
+      const undefinedDefault = d.raw !== 'X' && d.code === 'X';
+      if (undefinedDefault) notes.push(`role “${escapeHtml(d.name)}” has the default “${escapeHtml(d.raw)}”, which Odessa reads as Undefined (no access), not as the site default. It is shown as N — None, which gives the same access here`);
+      roles.push({ name: d.name, defaultPermission: undefinedDefault ? 'N' : d.code });
+    }
+    if (!roles.length && !blockers.length) blockers.push('the user has no active role');
+    if (site === null) blockers.push('the site default can\'t be read');
+    const offline = [];
+    if (u.approvalStatus !== 'Approved') offline.push(`the account is ${escapeHtml(String(u.approvalStatus || 'not approved'))}`);
+    return { id: u.id, loginName: String(u.loginName || ''), fullName: u.fullName ? String(u.fullName) : '',
+      approvalStatus: u.approvalStatus, loginEffectiveDate: u.loginEffectiveDate || null, loginExpiryDate: u.loginExpiryDate || null,
+      isLoginBlocked: !!u.isLoginBlocked, isAdminBlocked: !!u.isAdminBlocked, loginBlockedTime: u.loginBlockedTime || null,
+      roles, blockers, notes, offline };
+  });
+  // Login finds the user by name ignoring case and takes the first match, so with two such accounts which
+  // one is used isn't defined (SecurityService.GetUserByLoginName).
+  const byLogin = new Map();
+  for (const u of users) { const k = u.loginName.toLowerCase(); byLogin.set(k, (byLogin.get(k) || 0) + 1); }
+  for (const u of users) if (byLogin.get(u.loginName.toLowerCase()) > 1) {
+    u.notes.push(`another account has the login name “${escapeHtml(u.loginName)}” (ignoring case); Odessa doesn't define which of them a login uses`);
+  }
+  const lockout = Number.isInteger(doc.accountLockoutDurationInMins) ? doc.accountLockoutDurationInMins : null;
+  // CheckForBlockedLoginAccount reads SecConfig.AccountLockoutDurationInMins on every login; with no
+  // SecurityConfigs row that read fails, so no one can log in.
+  if (lockout === null) {
+    warnings.push('The database has no security settings row (<code class="inline">SecurityConfigs</code>), so Odessa can\'t check account lockouts and no one can log in.');
+    for (const u of users) u.offline.push('the database has no security settings row');
+  }
+  return { data: { exportedAt: doc.exportedAt || null, source: doc.source || {}, siteRaw, site, lockout, users }, warnings };
+}
+
+// The checks that depend on when the file is used (UserLoginAuditBehavior.xaml), worked out when a user is
+// picked. today = the local date as yyyy-mm-dd; Odessa uses the web server's local date and time.
+function loginTimeReasons(u, today, now, lockout) {
+  const out = [];
+  // CheckForUserLoginEffectiveDate: CurrentServerDate >= LoginEffectiveDate, never true for a missing date.
+  if (!u.loginEffectiveDate) out.push('the login has no effective date');
+  else if (today < u.loginEffectiveDate) out.push(`the login isn't effective until ${escapeHtml(u.loginEffectiveDate)}`);
+  if (u.loginExpiryDate && today > u.loginExpiryDate) out.push(`the login expired on ${escapeHtml(u.loginExpiryDate)}`);
+  // CheckForBlockedLoginAccount: needs LoginBlockedTime; then admin-blocked or a 0-minute lockout blocks for
+  // good, otherwise only until LoginBlockedTime + the lockout.
+  if (u.loginBlockedTime && u.isLoginBlocked) {
+    const until = new Date(new Date(u.loginBlockedTime).getTime() + (lockout || 0) * 60000);
+    if (u.isAdminBlocked) out.push('an administrator blocked the login');
+    else if (lockout === null) return out; // already reported: no security settings row
+    else if (lockout === 0 || now <= until) out.push(`the login is blocked${lockout === 0 ? '' : ` until ${escapeHtml(until.toLocaleString())}`}`);
+  }
+  return out;
+}
+const localIsoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const userPickLabel = (u) => `${u.loginName}${u.fullName ? ' — ' + u.fullName : ''}${u.approvalStatus && u.approvalStatus !== 'Approved' ? ' · ' + u.approvalStatus : ''} · #${u.id}`;
+
+function showUsersFile(result) {
+  importedUsers = result.data;
+  importedUser = null; // roles picked from an earlier file stay on the left, now treated like roles typed by hand
+  const dl = $('usersList');
+  dl.innerHTML = '';
+  for (const u of importedUsers.users) { const o = document.createElement('option'); o.value = userPickLabel(u); dl.appendChild(o); }
+  const when = importedUsers.exportedAt ? new Date(importedUsers.exportedAt) : null;
+  const src = importedUsers.source || {};
+  $('usersInfo').textContent = `${importedUsers.users.length} users` +
+    (when && !isNaN(when) ? `, exported ${when.toLocaleString()}` : '') +
+    (src.database ? ` from ${src.database}${src.server ? ' on ' + src.server : ''}` : '') + '.';
+  $('userPick').value = '';
+  $('userNotes').innerHTML = result.warnings.map(w => `<div class="banner">${w}</div>`).join('');
+  $('usersEmpty').hidden = true;
+  $('usersLoaded').hidden = false;
+}
+
+// Puts one imported user on the left: their roles, each role's default, and the site default.
+function applyImportedUser(u) {
+  const now = new Date();
+  const offline = u.offline.concat(loginTimeReasons(u, localIsoDate(now), now, importedUsers.lockout));
+  const notes = [];
+  if (u.blockers.length) {
+    notes.push(`<div class="banner"><strong>${escapeHtml(u.loginName)} can't log in</strong>: ${u.blockers.join('; ')}. Odessa gives this user no permissions, so the roles on the left were left as they were.</div>`);
+    // The user already on the left (if any) is still the one shown; keep saying so.
+    const showing = $('importShowing');
+    $('userNotes').innerHTML = notes.join('') + (importedUser && showing ? showing.outerHTML : '');
+    return false;
+  }
+  userRoles.splice(0, userRoles.length, ...u.roles.map(r => ({ name: r.name, defaultPermission: r.defaultPermission })));
+  setSiteLevelDefault(importedUsers.site);
+  traceReturn = null;
+  renderRoles();
+  applyingImport = true;
+  try { rolesChanged(); } finally { applyingImport = false; } // also stops Field View replacing these roles
+  importedUser = u;
+  if (appMode === 'matrix' && parsed) renderMatrix();
+  if (offline.length) notes.push(`<div class="banner"><strong>${escapeHtml(u.loginName)} can't log in right now</strong>: ${offline.join('; ')}. The results show what these roles would give.</div>`);
+  if (u.notes.length) notes.push(`<div class="banner">${u.notes.join('; ')}.</div>`);
+  notes.push(`<p class="muted-note" id="importShowing">Showing <strong>${escapeHtml(u.fullName || u.loginName)}</strong> (${escapeHtml(u.loginName)}, #${escapeHtml(String(u.id))}): ${u.roles.length} role${u.roles.length === 1 ? '' : 's'}, site default ${escapeHtml(importedUsers.site)}.</p>`);
+  $('userNotes').innerHTML = notes.join('');
+  return true;
+}
+// Roles or the site default changed by hand: the left no longer shows the picked user as exported.
+function importEdited() {
+  if (!importedUser || applyingImport) return;
+  importedUser = null;
+  $('userPick').value = ''; // so picking the same user again works
+  const s = $('importShowing');
+  if (s) s.insertAdjacentHTML('beforeend', ' <em>Edited since, so this no longer matches the file.</em>');
+}
+
+// The site default select offers F / R / N; a stored M or X gets its own option while it is the value.
+function setSiteLevelDefault(code) {
+  const sel = $('siteLevelDefault');
+  [...sel.options].forEach(o => { if (o.dataset.extra) o.remove(); });
+  if (![...sel.options].some(o => o.value === code)) {
+    const o = document.createElement('option');
+    o.value = code; o.dataset.extra = '1';
+    o.textContent = `${code} — ${code === 'X' ? 'Undefined' : PERM_NAME[code]} (from the users file)`;
+    sel.appendChild(o);
+  }
+  sel.value = code;
+  siteLevelDefault = code;
+}
+
+function loadUsersFile(f) {
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const result = parseUserImport(String(reader.result));
+    if (result.error) {
+      $('usersMsg').textContent = `${f.name}: ${result.error}`;
+      $('usersEmpty').hidden = false; $('usersLoaded').hidden = true;
+      return;
+    }
+    showUsersFile(result);
+  };
+  reader.onerror = () => { $('usersMsg').textContent = `Couldn't read ${f.name}.`; };
+  reader.readAsText(f);
+}
+$('loadUsers').addEventListener('click', () => $('usersFile').click());
+$('changeUsers').addEventListener('click', () => $('usersFile').click());
+$('usersFile').addEventListener('change', e => { loadUsersFile(e.target.files[0]); e.target.value = ''; });
+// A datalist pick sets the box to a label exactly; typing part of a name only filters the list.
+$('userPick').addEventListener('input', e => {
+  if (!importedUsers) return;
+  const u = importedUsers.users.find(x => userPickLabel(x) === e.target.value);
+  if (u) applyImportedUser(u);
 });
 
 // Mode toggle wiring
@@ -3747,7 +3989,8 @@ function runTests() {
   // recommends or names it. It shows only when the workbook itself has an M cell (Permission.Parse still
   // reads it), and the record / child checks stay at Covers(Modify).
   const noModify = (s) => !/Modify|\bM — /.test(s);
-  const optionCodes = (sel) => [...sel.options].map(o => o.value).filter(Boolean).join('');
+  // Leaves out an option a users file added for its own stored value (setSiteLevelDefault).
+  const optionCodes = (sel) => [...sel.options].filter(o => !o.dataset.extra).map(o => o.value).filter(Boolean).join('');
   const withParsed = (wb, fn) => { const saved = parsed; parsed = wb; try { return fn(); } finally { parsed = saved; } };
   const wb = (...blocks) => ({ Entities: blocks, Transactions: [], Tasks: [] });
   // Renders Field View for one synthetic block and returns its text, then puts the pane and state back.
@@ -3820,6 +4063,135 @@ function runTests() {
     } }
   ];
 
+  // Users file (scripts/export-users.ps1): Permission.Parse parity, what login would give each user, and
+  // picking a user. The picking cases drive the real left pane, so every piece of state is put back.
+  const parseTable = (pairs) => {
+    const bad = pairs.filter(([s, want]) => frameworkParsePermission(s) !== want);
+    return { ok: !bad.length, detail: bad.length ? bad.map(([s, w]) => `${JSON.stringify(s)} → ${frameworkParsePermission(s)}, want ${w}`).join('; ') : `${pairs.length} values` };
+  };
+  const usersDoc = (over) => JSON.stringify(Object.assign({ format: 'rbs-users/1', exportedAt: '2026-01-01T00:00:00Z', source: { server: 'S', database: 'D' },
+    siteLevelDefault: 'F', accountLockoutDurationInMins: 60, roles: [{ name: 'Clerk', defaultPermission: 'R' }, { name: 'Manager', defaultPermission: 'X' }],
+    users: [{ id: 1, loginName: 'amy', fullName: 'Amy', approvalStatus: 'Approved', isLoginBlocked: false, isAdminBlocked: false, roles: [{ name: 'Clerk' }, { name: 'Manager' }] }] }, over));
+  const oneUser = (over, userOver) => {
+    const d = JSON.parse(usersDoc(over));
+    Object.assign(d.users[0], userOver || {});
+    return parseUserImport(JSON.stringify(d));
+  };
+  const plain = (s) => s.replace(/<[^>]+>/g, '');
+  const withImportState = (fn) => {
+    const sel = $('siteLevelDefault');
+    const saved = { roles: userRoles.slice(), site: siteLevelDefault, selHtml: sel.innerHTML, selValue: sel.value, modified: rolesUserModified,
+      users: importedUsers, user: importedUser, notes: $('userNotes').innerHTML, ret: traceReturn, pick: $('userPick').value };
+    try { return fn(); } finally {
+      userRoles.splice(0, userRoles.length, ...saved.roles);
+      siteLevelDefault = saved.site; sel.innerHTML = saved.selHtml; sel.value = saved.selValue;
+      rolesUserModified = saved.modified; importedUsers = saved.users; importedUser = saved.user;
+      $('userNotes').innerHTML = saved.notes; traceReturn = saved.ret; $('userPick').value = saved.pick;
+      renderRoles();
+    }
+  };
+  const importCases = [
+    { name: 'Permission.Parse: one letter in either case; anything else of length 1 is an error', custom: () => parseTable([
+      ['f', 'F'], ['F', 'F'], ['x', 'X'], ['m', 'M'], ['R', 'R'], ['n', 'N'], ['_', null], ['3', null], ['Y', null], ['K', null], ['﻿', null]]) },
+    { name: 'Permission.Parse: blank or .NET whitespace is Undefined', custom: () => parseTable([['', 'X'], ['   ', 'X'], ['\t', 'X'], ['\u0085 ', 'X']]) },
+    { name: 'Permission.Parse: longer values are AccessMode names (ASCII case ignored, trimmed), Int32 numbers or OR\'d comma lists, then 0..4 only', custom: () => parseTable([
+      ['Full', 'F'], ['full', 'F'], [' Full ', 'F'], ['Full\u0085', 'F'], ['Undefined', 'X'], ['MODIFY', 'M'], ['None', 'N'], ['Fulll', null], ['f ', null], ['X ', null],
+      ['constructor', null], ['__proto__', null], ['04', 'F'], [' 0004 ', 'F'], ['-0', 'X'], ['+2', 'R'], ['05', null], ['-1', null], ['1e1', null], ['99999999999', null],
+      ['None, Read', 'M'], ['Undefined,Full', 'F'], ['Read, Full', null], ['FULL,none', null], ['Read,', null], [',Full', null]]) },
+    { name: 'users file: not JSON, or not rbs-users/1 → refused with a reason', custom: () => {
+      const a = parseUserImport('{oops'), b = parseUserImport(JSON.stringify({ format: 'other' }));
+      return { ok: !!a.error && !!b.error && !a.data && !b.data, detail: `${a.error} | ${b.error}` };
+    } },
+    { name: 'users file: site default "f" is Full; a role default X stays X (the site default); R stays R', custom: () => {
+      const r = oneUser({ siteLevelDefault: 'f' }), u = r.data.users[0];
+      const roles = u.roles.map(x => x.name + ':' + x.defaultPermission).join(',');
+      return { ok: r.data.site === 'F' && roles === 'Clerk:R,Manager:X' && !u.blockers.length && !r.warnings.length, detail: `site ${r.data.site}, ${roles}` };
+    } },
+    { name: 'users file: no site default row → Full, with a note', custom: () => {
+      const r = oneUser({ siteLevelDefault: null });
+      return { ok: r.data.site === 'F' && r.warnings.length === 1, detail: `site ${r.data.site}, ${r.warnings.length} note(s)` };
+    } },
+    { name: 'users file: site default blank → Undefined (not Full); unreadable → every user refused', custom: () => {
+      const blank = oneUser({ siteLevelDefault: '' }), bad = oneUser({ siteLevelDefault: 'Fulll' });
+      return { ok: blank.data.site === 'X' && bad.data.site === null && bad.data.users[0].blockers.length > 0,
+        detail: `blank → ${blank.data.site}; "Fulll" → ${bad.data.site}, blockers: ${plain(bad.data.users[0].blockers.join('; '))}` };
+    } },
+    { name: 'users file: role default "x" is Undefined, not the site default → shown as N with a note; "_" or blank → user refused', custom: () => {
+      const role = (d) => oneUser({ roles: [{ name: 'Clerk', defaultPermission: d }] }, { roles: [{ name: 'Clerk' }] }).data.users[0];
+      const low = role('x'), bad = role('_'), blank = role(' ');
+      return { ok: low.roles[0].defaultPermission === 'N' && low.notes.length === 1 && !low.blockers.length
+          && bad.blockers.length === 1 && !bad.roles.length && blank.blockers.length === 1 && !blank.roles.length,
+        detail: `x → ${low.roles[0].defaultPermission}; _ → ${plain(bad.blockers.join('; '))}; blank → ${blank.blockers.length} blocker(s)` };
+    } },
+    { name: 'users file: a user with no active role is refused; role names match ignoring case', custom: () => {
+      const none = oneUser(null, { roles: [] }).data.users[0], cased = oneUser(null, { roles: [{ name: 'CLERK' }] }).data.users[0];
+      return { ok: none.blockers.length === 1 && cased.roles.length === 1 && cased.roles[0].name === 'Clerk', detail: `${plain(none.blockers.join(''))}; CLERK → ${cased.roles.map(x => x.name)}` };
+    } },
+    { name: 'users file: same login name twice (different case) stays two users with different labels, both noted', custom: () => {
+      const d = JSON.parse(usersDoc());
+      d.users.push(Object.assign({}, d.users[0], { id: 2, loginName: 'AMY', approvalStatus: 'Inactive' }));
+      const us = parseUserImport(JSON.stringify(d)).data.users, labels = us.map(userPickLabel);
+      return { ok: us.length === 2 && labels[0] !== labels[1] && labels[1].includes('Inactive') && labels[1].includes('#2') && us.every(u => u.notes.length === 1),
+        detail: labels.join(' | ') };
+    } },
+    { name: 'users file: not Approved, or outside the login dates (a missing effective date never passes) → applied, with a reason', custom: () => {
+      const reasons = (userOver) => { const u = oneUser(null, userOver).data.users[0]; return u.offline.concat(loginTimeReasons(u, '2026-06-01', new Date('2026-06-01T12:00:00Z'), 60)); };
+      const inactive = reasons({ approvalStatus: 'Inactive', loginEffectiveDate: '2026-01-01' });
+      const future = reasons({ loginEffectiveDate: '2099-01-01' }), none = reasons({ loginEffectiveDate: null });
+      const expired = reasons({ loginEffectiveDate: '2026-01-01', loginExpiryDate: '2026-05-31' }), lastDay = reasons({ loginEffectiveDate: '2026-06-01', loginExpiryDate: '2026-06-01' });
+      const ok = inactive.length === 1 && future.length === 1 && none.length === 1 && expired.length === 1 && lastDay.length === 0;
+      return { ok, detail: `inactive ${inactive.length}, future ${future.length}, no date ${none.length}, expired ${expired.length}, first=last day ${lastDay.length}` };
+    } },
+    { name: 'users file: blocked only with a block time — admin or a 0-minute lockout for good, otherwise until the lockout ends', custom: () => {
+      const now = new Date('2026-06-01T12:00:00Z');
+      const blocked = (userOver, lockout) => {
+        const u = oneUser(null, Object.assign({ loginEffectiveDate: '2026-01-01', isLoginBlocked: true }, userOver)).data.users[0];
+        return loginTimeReasons(u, '2026-06-01', now, lockout).length > 0;
+      };
+      const cases = [
+        [blocked({ loginBlockedTime: null, isAdminBlocked: true }, 60), false],            // no block time: never blocked
+        [blocked({ loginBlockedTime: '2026-06-01T11:30:00Z' }, 60), true],                 // inside the lockout
+        [blocked({ loginBlockedTime: '2026-06-01T10:00:00Z' }, 60), false],                // lockout over
+        [blocked({ loginBlockedTime: '2025-01-01T00:00:00Z', isAdminBlocked: true }, 60), true],
+        [blocked({ loginBlockedTime: '2025-01-01T00:00:00Z' }, 0), true],
+        [blocked({ loginBlockedTime: '2026-06-01T11:30:00Z', isLoginBlocked: false }, 60), false]];
+      const bad = cases.map((c, i) => c[0] === c[1] ? null : i).filter(i => i !== null);
+      return { ok: !bad.length, detail: bad.length ? `wrong: case ${bad.join(', ')}` : `${cases.length} cases` };
+    } },
+    { name: 'picking a user fills the roles, their defaults and the site default; Field View auto-fill stays off', custom: () => withImportState(() => {
+      const r = oneUser({ siteLevelDefault: 'r' });
+      importedUsers = r.data; rolesUserModified = false;
+      const applied = applyImportedUser(r.data.users[0]);
+      const roles = userRoles.map(x => x.name + ':' + x.defaultPermission).join(',');
+      const ok = applied && roles === 'Clerk:R,Manager:X' && siteLevelDefault === 'R' && $('siteLevelDefault').value === 'R'
+        && rolesUserModified && importedUser === r.data.users[0] && $('roleList').querySelectorAll('.role-row').length === 2;
+      return { ok, detail: `${roles}; site ${siteLevelDefault}/${$('siteLevelDefault').value}; modified=${rolesUserModified}` };
+    }) },
+    { name: 'picking a user with site default M or a role default m: both get their own option; picking another removes it', custom: () => withImportState(() => {
+      const r = oneUser({ siteLevelDefault: 'Modify', roles: [{ name: 'Clerk', defaultPermission: 'm' }] }, { roles: [{ name: 'Clerk' }] });
+      importedUsers = r.data; applyImportedUser(r.data.users[0]);
+      const siteOk = $('siteLevelDefault').value === 'M' && siteLevelDefault === 'M';
+      const roleSel = $('roleList').querySelector('select'), roleOk = roleSel && roleSel.value === 'M';
+      const r2 = oneUser(); importedUsers = r2.data; applyImportedUser(r2.data.users[0]);
+      const gone = ![...$('siteLevelDefault').options].some(o => o.value === 'M');
+      return { ok: siteOk && roleOk && gone, detail: `site M=${siteOk}, role M=${roleOk}, extra option removed=${gone}` };
+    }) },
+    { name: 'site default blank (Undefined) + a role default X → the role gets Undefined, so the answer is X, as in Odessa', custom: () => withImportState(() => {
+      const r = oneUser({ siteLevelDefault: '' }, { roles: [{ name: 'Manager' }] }); importedUsers = r.data; applyImportedUser(r.data.users[0]);
+      const t = evaluate(A1(['X'], ['X']), null, userRoles, siteLevelDefault, {});
+      return { ok: siteLevelDefault === 'X' && t.final === 'X', detail: `site ${siteLevelDefault}, final ${t.final}` };
+    }) },
+    { name: 'a refused user leaves the roles on the left as they were; editing by hand marks the pick as edited', custom: () => withImportState(() => {
+      const r = oneUser(); importedUsers = r.data; applyImportedUser(r.data.users[0]);
+      const before = userRoles.map(x => x.name).join(','), none = oneUser(null, { roles: [] }).data.users[0];
+      const refused = applyImportedUser(none) === false && userRoles.map(x => x.name).join(',') === before
+        && importedUser === r.data.users[0] && !!$('importShowing');
+      applyImportedUser(r.data.users[0]); rolesChanged();
+      const edited = importedUser === null && $('userNotes').textContent.includes('Edited since');
+      return { ok: refused && edited, detail: `refused kept roles=${refused}, edit marked=${edited}` };
+    }) }
+  ];
+
   // ── Run all groups ──
   const groups = [
     runGroup('Core algorithm', tests, tc => {
@@ -3836,7 +4208,8 @@ function runTests() {
     runGroup('Child list — Add / Remove buttons need the child record too', childCases, tc => tc.custom ? tc.custom() : runChild(tc)),
     runGroup('Trace sheet — compact view keeps every cell the answer used', compactCases, runCompact),
     runGroup('Trace — Open child / Back round trip', [{ name: 'Back restores the parent row and its record properties; picking another record ends it', custom: backCase }], tc => tc.custom()),
-    runGroup('Modify hidden — M appears only when the sheet has it', modifyCases, tc => tc.custom())
+    runGroup('Modify hidden — M appears only when the sheet has it', modifyCases, tc => tc.custom()),
+    runGroup('Users file — what login gives each user, and picking one', importCases, tc => tc.custom())
   ];
   const tp = groups.reduce((s, g) => s + g.passed, 0);
   const tt = groups.reduce((s, g) => s + g.total, 0);

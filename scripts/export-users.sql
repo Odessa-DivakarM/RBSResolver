@@ -28,7 +28,8 @@
       there is no such row. siteLevelDefault is that row's Value exactly as stored, or null when there is no
       row. The importer turns it into a code the way Permission.Parse does ('f' and 'Full' are Full, blank is
       Undefined, anything else unparseable makes every login fail). A portfolio can override it, but a fresh
-      login reads it before the portfolio is known, so the override is not exported.
+      login reads it before the portfolio is known, so the override is not exported. A product can also
+      supply it through AdditionalParamConfigProvider (empty in the framework); that isn't exported either.
     - A role's default is exported as stored. 'X' (upper case only: PermissionValues.IsX) means "use the
       site-level default"; a lower-case 'x' is Undefined; the importer parses the rest like Permission.Parse.
 */
