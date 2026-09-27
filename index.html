@@ -318,9 +318,9 @@ button.secondary {
 button.secondary:hover { border-color: var(--accent); color: var(--accent); }
 .role-row {
   display: grid;
-  /* Role name : default-access dropdown = 2 : 1, but the dropdown is never narrower than its longest option
-     ("X — Site default"), so the chosen value is never cut off. In a narrow pane the role name gives way. */
-  grid-template-columns: minmax(0, 2fr) minmax(max-content, 1fr) 28px;
+  /* The default-access dropdown is only as wide as the value it shows (see #roleList select below); the role
+     name takes everything else. */
+  grid-template-columns: minmax(0, 1fr) auto 28px;
   gap: 6px;
   margin-bottom: 6px;
   align-items: center;
@@ -332,6 +332,20 @@ button.secondary:hover { border-color: var(--accent); color: var(--accent); }
   border-radius: 4px;
   min-width: 0;
 }
+/* Each role's dropdown fits the option it shows ("N — None" narrow, "X — Site default" wider), so the chosen value
+   is never cut off and the role name gets the rest. Browsers without field-sizing (Firefox) size it to the longest
+   option instead. Only the roles list: the record-property rows keep their fixed column. */
+#roleList .role-row select { field-sizing: content; }
+/* Role name box with a ▾ showing the workbook's roles (datalist) can be picked as well as typed. The ▾ is only a
+   picture: clicks pass through to the box, and clicking the box is what opens the list (a separate button calling
+   showPicker() opened nothing in testing). Chromium's own ▾ appears only on hover; it is hidden so there is only one. */
+.role-name { position: relative; min-width: 0; }
+.role-name input { width: 100%; }
+.role-name.has-pick input { padding-right: 24px; } /* room for the ▾ only when it is shown */
+.role-row input[list]::-webkit-calendar-picker-indicator { display: none !important; }
+.role-pick { position: absolute; top: 0; right: 0; bottom: 0; width: 22px; pointer-events: none; }
+.role-pick::before { content: ''; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: translate(-50%, -70%) rotate(45deg); }
+.role-name:hover .role-pick::before, .role-name:focus-within .role-pick::before { border-color: var(--accent); }
 .role-row .remove {
   background: transparent;
   border: 1px solid var(--border);
@@ -1968,7 +1982,20 @@ function renderRoles() {
     nameInput.setAttribute('list', 'rolesList');
     nameInput.placeholder = 'Enter or pick a role';
     nameInput.addEventListener('input', e => { r.name = e.target.value; rolesChanged(true); });
-    row.appendChild(nameInput);
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'role-name';
+    nameWrap.appendChild(nameInput);
+    // ▾ only when there is a list to pick from. A picture, not a control: the box itself opens the list
+    // (click, or Alt+↓), and the box's own list="" already tells screen readers there are suggestions.
+    if ($('rolesList').options.length) {
+      const pick = document.createElement('span');
+      pick.className = 'role-pick';
+      pick.setAttribute('aria-hidden', 'true');
+      nameWrap.appendChild(pick);
+      nameWrap.classList.add('has-pick');
+      nameInput.title = 'Type a role, or pick one from the list';
+    }
+    row.appendChild(nameWrap);
     const permSel = document.createElement('select');
     for (const p of ['F', 'M', 'R', 'N', 'X']) {
       const opt = document.createElement('option');
