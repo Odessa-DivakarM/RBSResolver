@@ -318,9 +318,9 @@ button.secondary {
 button.secondary:hover { border-color: var(--accent); color: var(--accent); }
 .role-row {
   display: grid;
-  /* auto: the default-access dropdown is as wide as its longest option ("X — Site level default"), so the
-     chosen value is never cut off; the role name takes the rest. */
-  grid-template-columns: 1fr auto 28px;
+  /* Role name : default-access dropdown = 2 : 1, but the dropdown is never narrower than its longest option
+     ("X — Site default"), so the chosen value is never cut off. In a narrow pane the role name gives way. */
+  grid-template-columns: minmax(0, 2fr) minmax(max-content, 1fr) 28px;
   gap: 6px;
   margin-bottom: 6px;
   align-items: center;
@@ -807,7 +807,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
     <div class="panel" id="systemPanel" style="display:none;">
       <h2>System config</h2>
       <div class="field">
-        <label>GP system fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' in your Odessa DB. Used when a role's default permission is X (site level default).">?</span></label>
+        <label>GP system fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' in your Odessa DB. Used when a role's default permission is X (site default).">?</span></label>
         <select id="siteLevelDefault">
           <option value="F" selected>F &mdash; Full</option>
           <option value="M">M &mdash; Modify</option>
@@ -821,7 +821,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
       <div class="field"><label>Roles assigned to the user<span class="tip" tabindex="0" data-tip="Role Names and the Default Permission value from Roles.DefaultPermission table in your Odessa DB">?</span></label></div>
       <div id="roleList"></div>
       <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
-      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (site level default)</strong>, the system uses the GP fallback above.</p>
+      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (site default)</strong>, the system uses the GP fallback above.</p>
     </div>
     <div class="panel" id="queryPanel" style="display:none;">
       <h2>What are you checking?</h2>
@@ -1973,7 +1973,7 @@ function renderRoles() {
     for (const p of ['F', 'M', 'R', 'N', 'X']) {
       const opt = document.createElement('option');
       // X in a role's DB default means "use the site-level GP fallback", not an undefined value.
-      opt.value = p; opt.textContent = `${p} — ${p === 'X' ? 'Site level default' : PERM_NAME[p]}`;
+      opt.value = p; opt.textContent = `${p} — ${p === 'X' ? 'Site default' : PERM_NAME[p]}`;
       if (r.defaultPermission === p) opt.selected = true;
       permSel.appendChild(opt);
     }
@@ -2110,7 +2110,7 @@ function easyBannerText(raw) {
   if (raw.startsWith('Parse warning'))
     return 'The spreadsheet contains some unexpected values. They\'ve been treated as "not set" (X).';
   if (raw.startsWith('Site-level substitution'))
-    return 'One or more roles have X (site level default), so the system used the GP fallback value.';
+    return 'One or more roles have X (site default), so the system used the GP fallback value.';
   if (raw.startsWith('Role "')) {
     const m = raw.match(/^Role "(.*?)" is not/);
     const name = m ? escapeHtml(m[1]) : 'unknown';
@@ -2270,7 +2270,7 @@ function buildNarrativeTrace(t) {
     }
     if (role.substituted) {
       addStoryBlock(host,
-        `Note: <strong>${escapeHtml(role.role)}</strong>'s database default was X (site level default), so it was replaced with the system fallback (${permChip(role.defaultPerm)}) before checking.`);
+        `Note: <strong>${escapeHtml(role.role)}</strong>'s database default was X (site default), so it was replaced with the system fallback (${permChip(role.defaultPerm)}) before checking.`);
     }
     if (!compact) {
       addStoryBlock(host,
@@ -2418,7 +2418,7 @@ function buildChildPanel(lim, sheetBlocks) {
     const site = normCode(siteLevelDefault || 'F');
     const list = userRoles.filter(r => r.name).map(r => {
       const p = normCode(r.defaultPermission);
-      return `${escapeHtml(r.name)} ${p === 'X' ? `(X, site level default &rarr; system fallback ${site})` : p}`;
+      return `${escapeHtml(r.name)} ${p === 'X' ? `(X, site default &rarr; system fallback ${site})` : p}`;
     }).join(', ');
     note(`${cn} has no block without record properties in the sheet, so the system uses the highest default access level among the user's roles${list ? `: ${list}` : ''}.`);
     return panel;
@@ -4352,7 +4352,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   // C — change the role's default access level
   const subst = trace.substitutions.find(s => s.role === roleName);
   const curDef = subst
-    ? ` (currently X, site level default, so the system fallback — <strong>${subst.resolved}</strong> — is used.)`
+    ? ` (currently X, site default, so the system fallback — <strong>${subst.resolved}</strong> — is used.)`
     : ` (currently ${cur(roleDefault)}.)`;
   options.push({
     letter: 'C', applicable: true,
