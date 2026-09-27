@@ -824,7 +824,6 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
         <label>GP system fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' in your Odessa DB. Used when a role's default permission is X (site default).">?</span></label>
         <select id="siteLevelDefault">
           <option value="F" selected>F &mdash; Full</option>
-          <option value="M">M &mdash; Modify</option>
           <option value="R">R &mdash; Read</option>
           <option value="N">N &mdash; None</option>
         </select>
@@ -855,7 +854,6 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
         <select id="targetPerm">
           <option value="">— show table only —</option>
           <option value="F">F — Full</option>
-          <option value="M">M — Modify</option>
           <option value="R">R — Read</option>
           <option value="N">N — None</option>
         </select>
@@ -918,20 +916,27 @@ const UX_EFFECT = {
   Transactions: {
     F: 'All modes can be opened, including Create. Also counts for workflow work items (those need Full).',
     M: 'All modes can be opened, including Create. Not enough for workflow work items (those need Full).',
-    R: 'View and Edit can be opened; Create is refused (it needs Modify).',
+    R: 'View and Edit can be opened; Create is refused (it needs Full).',
     N: 'Cannot be opened and is not offered in menus.',
     X: 'No rule gives a value; treated as None &mdash; cannot be opened.'
   },
   Tasks: {
     F: 'Offered when setting up jobs.',
     M: 'Offered when setting up jobs.',
-    R: 'Not offered when setting up jobs (needs Modify).',
+    R: 'Not offered when setting up jobs (needs Full).',
     N: 'Not offered when setting up jobs.',
     X: 'No rule gives a value; treated as None &mdash; not offered when setting up jobs.'
   }
 };
 function uxEffect(sheet, perm) {
   return (UX_EFFECT[sheet] || UX_EFFECT.Entities)[perm];
+}
+// Codes a legend or filter offers. M isn't a level in use, but Permission.Parse still reads it, so it's
+// listed only when the loaded workbook has an M cell. Not cached: runTests() pushes blocks into parsed.
+function shownPermCodes() {
+  const hasM = !!parsed && ['Entities', 'Transactions', 'Tasks'].some(s => (parsed[s] || []).some(b =>
+    (b.permissions || []).includes('M') || (b.operations || []).some(o => o.values.includes('M'))));
+  return hasM ? ['F', 'M', 'R', 'N', 'X'] : ['F', 'R', 'N', 'X'];
 }
 
 // What the UI actually lets the user do with one field (or action) of a record, combining the
@@ -1042,7 +1047,7 @@ function recordLimitText(lim) {
   const e = `<strong>${lim.entityPerm} — ${PERM_NAME[lim.entityPerm]}</strong>`;
   const parts = [];
   if (lim.effect.limitedByRecord === 'readOnly') {
-    parts.push(`This row allows ${f}, but the record itself is only ${e} for this user, so a field stays <strong>read-only</strong> and an action can't be used. To make it usable, give the record Modify or higher.`);
+    parts.push(`This row allows ${f}, but the record itself is only ${e} for this user, so a field stays <strong>read-only</strong> and an action can't be used. To make it usable, give the record Full.`);
   } else if (lim.effect.limitedByRecord === 'blocked') {
     parts.push(`This row allows ${f}, but the record itself is ${e} for this user, so this field or action isn't shown. The record needs Read or higher first.`);
   }
@@ -1051,7 +1056,7 @@ function recordLimitText(lim) {
     const cp = `<strong>${c.perm} — ${PERM_NAME[c.perm]}</strong>`;
     const why = c.source === 'roleDefaults'
       ? ` (${cn} has no block without conditions in the sheet, so the system uses the highest default access level among the user's roles.)` : '';
-    parts.push(`This is the <strong>${btn}</strong> button of the ${cn} list. The row allows ${f}, but ${cn} itself is only ${cp} for this user, so the ${btn} button isn't shown. Give ${cn} Modify or higher.${why}`);
+    parts.push(`This is the <strong>${btn}</strong> button of the ${cn} list. The row allows ${f}, but ${cn} itself is only ${cp} for this user, so the ${btn} button isn't shown. Give ${cn} Full.${why}`);
   }
   return parts.join('<br><br>');
 }
@@ -1997,7 +2002,8 @@ function renderRoles() {
     }
     row.appendChild(nameWrap);
     const permSel = document.createElement('select');
-    for (const p of ['F', 'M', 'R', 'N', 'X']) {
+    // No M: a role's DefaultPermission can't be Modify (PermissionValues has only R / X / N / F).
+    for (const p of ['F', 'R', 'N', 'X']) {
       const opt = document.createElement('option');
       // X in a role's DB default means "use the site-level GP fallback", not an undefined value.
       opt.value = p; opt.textContent = `${p} — ${p === 'X' ? 'Site default' : PERM_NAME[p]}`;
@@ -2422,7 +2428,7 @@ function buildBackLink() {
   return bar;
 }
 
-// A child list's Add / Remove button also needs the child record itself at Modify (SPEC.md §7.4). That is a
+// A child list's Add / Remove button also needs the child record itself to cover Modify (SPEC.md §7.4). That is a
 // lookup by name, not for one record: the child's block without record properties, else the role defaults.
 // Shows the value the 🔒 decision used (lim.child.trace is that same evaluation) and how it was reached.
 function buildChildPanel(lim, sheetBlocks) {
@@ -2431,8 +2437,8 @@ function buildChildPanel(lim, sheetBlocks) {
   const panel = document.createElement('div');
   panel.className = 'panel';
   panel.innerHTML = `<h2>Also checked: the ${cn} record</h2>
-    <p style="font-size:13px; margin:0 0 10px;">The ${btn} button of the ${cn} list needs ${cn} itself at Modify or higher, not just this row.
-    For this user ${cn} is ${permChip(c.perm)} &mdash; ${enough ? `enough for the ${btn} button` : `below Modify, so the ${btn} button isn't shown`}.</p>`;
+    <p style="font-size:13px; margin:0 0 10px;">The ${btn} button of the ${cn} list needs ${cn} itself at Full, not just this row.
+    For this user ${cn} is ${permChip(c.perm)} &mdash; ${enough ? `enough for the ${btn} button${c.perm === 'M' ? ' (the sheet sets Modify, which counts the same as Full here)' : ''}` : `below Full, so the ${btn} button isn't shown`}.</p>`;
   const note = (html) => {
     const p = document.createElement('p');
     p.className = 'muted-note';
@@ -2576,7 +2582,7 @@ function buildSheetPanel(block, operationName, t) {
   const legend = document.createElement('div');
   legend.className = 'legend';
   legend.innerHTML =
-    ['F','M','R','N','X'].map(p => `<span><span class="swatch cell-${p}"></span>${p} &mdash; ${PERM_NAME[p]}</span>`).join('') +
+    shownPermCodes().map(p => `<span><span class="swatch cell-${p}"></span>${p} &mdash; ${PERM_NAME[p]}</span>`).join('') +
     `<span><span class="swatch" style="background:var(--panel); outline:2px dashed var(--accent); outline-offset:-2px;"></span>read &mdash; visited, kept cascading</span>` +
     `<span><span class="swatch" style="background:var(--panel); outline:3px solid var(--accent); outline-offset:-3px; position:relative; display:inline-block;"><span style="position:absolute; top:0; right:0; width:0; height:0; border-style:solid; border-width:0 6px 6px 0; border-color:transparent var(--accent) transparent transparent;"></span></span>stopped &mdash; returned this value</span>`;
   panel.appendChild(legend);
@@ -2990,13 +2996,13 @@ function buildDemoWorkbook() {
       ['F', 'N', 'X'],
       [
         { name: 'Amount',   values: ['X', 'X', 'X'] },
-        { name: 'Customer', values: ['M', 'R', 'X'] },
-        { name: 'TaxCode',  values: ['F', 'N', 'M'] }
+        { name: 'Customer', values: ['F', 'R', 'X'] },
+        { name: 'TaxCode',  values: ['F', 'N', 'F'] }
       ]
     ),
     makeBlock('CreditMemo', 'Credit memo',
       ['*', 'Account Manager', 'Sales Manager'],
-      ['R', 'M', 'F'],
+      ['R', 'F', 'F'],
       [
         { name: 'Amount',     values: ['X', 'F', 'X'] },
         { name: 'ApprovedBy', values: ['R', 'X', 'X'] }
@@ -3587,7 +3593,7 @@ function runTests() {
     const el = buildChildPanel(lim, sheetBlocks), text = el.textContent;
     const stop = el.querySelector('table.sheet td.cell-stop');
     const ok = lim.child.block === plain && lim.child.trace.final === lim.child.perm && lim.child.perm === 'R'
-      && text.includes('below Modify') && text.includes('1 block(s) with record properties')
+      && text.includes('below Full') && text.includes('1 block(s) with record properties')
       && !!stop && stop.textContent === 'R';
     return { ok, detail: `child=${lim.child.perm}, block=${lim.child.block === plain ? 'plain' : 'other'}, stop=${stop && stop.textContent}` };
   };
@@ -3737,6 +3743,82 @@ function runTests() {
     }
   };
 
+  // M (Modify) isn't a level in use — no role default or site default can be M — so the UI never offers,
+  // recommends or names it. It shows only when the workbook itself has an M cell (Permission.Parse still
+  // reads it), and the record / child checks stay at Covers(Modify).
+  const noModify = (s) => !/Modify|\bM — /.test(s);
+  const optionCodes = (sel) => [...sel.options].map(o => o.value).filter(Boolean).join('');
+  const withParsed = (wb, fn) => { const saved = parsed; parsed = wb; try { return fn(); } finally { parsed = saved; } };
+  const wb = (...blocks) => ({ Entities: blocks, Transactions: [], Tasks: [] });
+  // Renders Field View for one synthetic block and returns its text, then puts the pane and state back.
+  const fieldView = (block, op, roles, site, sheetBlocks, click) => {
+    const host = $('fieldOutput'), savedHtml = host.innerHTML, savedRoles = userRoles.splice(0, userRoles.length, ...roles);
+    const savedSite = siteLevelDefault, savedOp = $('operation').value, savedTarget = $('targetPerm').value;
+    siteLevelDefault = site;
+    try {
+      const rows = computeFieldCoverageRows(block, op, roles, site, {});
+      renderFieldMode(block, op, rows, 'F', evaluate(block, op, roles, site, {}),
+        recordLimitFor('Entities', block, op, roles, site, {}, sheetBlocks || [block]));
+      const text = host.textContent, hasLink = !!host.querySelector('.fc-record-link');
+      let targetAfterClick = null;
+      if (click && hasLink) { host.querySelector('.fc-record-link').click(); targetAfterClick = $('targetPerm').value; }
+      return { text, hasLink, hasNote: !!host.querySelector('.record-limit'), targetAfterClick };
+    } finally {
+      userRoles.splice(0, userRoles.length, ...savedRoles);
+      siteLevelDefault = savedSite; $('operation').value = savedOp; $('targetPerm').value = savedTarget;
+      host.innerHTML = savedHtml;
+    }
+  };
+  const modifyCases = [
+    { name: 'dropdowns offer no M: site default F/R/N, target F/R/N, role default F/R/N/X', custom: () => {
+      const saved = userRoles.slice();
+      userRoles.splice(0, userRoles.length, { name: 'Role A', defaultPermission: 'X' });
+      try {
+        renderRoles();
+        const role = optionCodes($('roleList').querySelector('select')), site = optionCodes($('siteLevelDefault')), target = optionCodes($('targetPerm'));
+        return { ok: site === 'FRN' && target === 'FRN' && role === 'FRNX', detail: `site ${site}, target ${target}, role ${role}` };
+      } finally { userRoles.splice(0, userRoles.length, ...saved); renderRoles(); }
+    } },
+    { name: 'legend / filter codes: no M cell → F R N X', custom: () => {
+      const got = withParsed(wb(A1(['R'], ['F'])), shownPermCodes).join('');
+      return { ok: got === 'FRNX', detail: got };
+    } },
+    { name: 'legend / filter codes: M on a field row → M listed', custom: () => {
+      const got = withParsed(wb(A1(['R'], ['M'])), shownPermCodes).join('');
+      return { ok: got === 'FMRNX', detail: got };
+    } },
+    { name: 'legend / filter codes: M on the Permissions row of a Tasks block → M listed', custom: () => {
+      const got = withParsed({ Entities: [A1(['R'], ['F'])], Transactions: [], Tasks: [A1(['M'], ['X'])] }, shownPermCodes).join('');
+      return { ok: got === 'FMRNX', detail: got };
+    } },
+    { name: 'legend / filter codes: a block with no Permissions row does not break it', custom: () => {
+      const b = A1(['R'], ['F']); b.permissions = null;
+      const got = withParsed(wb(b), shownPermCodes).join('');
+      return { ok: got === 'FRNX', detail: got };
+    } },
+    { name: 'Field View, target F, record N: says the field stays hidden and the record needs F — Full; link sets target F', custom: () => {
+      const r = fieldView(A1(['N'], ['F']), 'Fld', mkRoles([['Role A', 'X']]), 'R', null, true);
+      const ok = r.hasLink && r.text.includes('stays hidden') && r.text.includes('needs F — Full') && noModify(r.text) && r.targetAfterClick === 'F';
+      return { ok, detail: `link=${r.hasLink}, target after click=${r.targetAfterClick}, no Modify=${noModify(r.text)}` };
+    } },
+    { name: 'Field View, target F, record R: says the field stays read-only', custom: () => {
+      const r = fieldView(A1(['R'], ['F']), 'Fld', mkRoles([['Role A', 'X']]), 'R');
+      return { ok: r.text.includes('stays read-only') && r.text.includes('needs F — Full') && noModify(r.text), detail: `note=${r.hasNote}` };
+    } },
+    { name: 'Field View, target F, record M from the sheet: editable, so no "record holds this field back" note', custom: () => {
+      const r = fieldView(A1(['M'], ['F']), 'Fld', mkRoles([['Role A', 'X']]), 'R');
+      return { ok: !r.hasNote && !r.hasLink, detail: `note=${r.hasNote}` };
+    } },
+    { name: 'Field View, child-list button, child R: says the child needs F — Full, never Modify', custom: () => {
+      const parent = CL('F', 'F', 'F'), r = fieldView(parent, 'CreateAssetFeature', mkRoles([['Role A', 'X']]), 'R', [parent, CH('R')]);
+      return { ok: r.text.includes('holds this button back') && r.text.includes('needs F — Full') && noModify(r.text), detail: `note=${r.hasNote}, no Modify=${noModify(r.text)}` };
+    } },
+    { name: 'Trace wording: record R under a field F says "give the record Full"', custom: () => {
+      const b = A1(['R'], ['F']), t = recordLimitText(recordLimitFor('Entities', b, 'Fld', mkRoles([['Role A', 'X']]), 'R', {}, [b]));
+      return { ok: t.includes('give the record Full') && noModify(t), detail: t.replace(/<[^>]+>/g, '').slice(0, 90) };
+    } }
+  ];
+
   // ── Run all groups ──
   const groups = [
     runGroup('Core algorithm', tests, tc => {
@@ -3752,7 +3834,8 @@ function runTests() {
     runGroup('Held-back marker — Matrix, Trace and Field View agree', markerCases, runMarker),
     runGroup('Child list — Add / Remove buttons need the child record too', childCases, tc => tc.custom ? tc.custom() : runChild(tc)),
     runGroup('Trace sheet — compact view keeps every cell the answer used', compactCases, runCompact),
-    runGroup('Trace — Open child / Back round trip', [{ name: 'Back restores the parent row and its record properties; picking another record ends it', custom: backCase }], tc => tc.custom())
+    runGroup('Trace — Open child / Back round trip', [{ name: 'Back restores the parent row and its record properties; picking another record ends it', custom: backCase }], tc => tc.custom()),
+    runGroup('Modify hidden — M appears only when the sheet has it', modifyCases, tc => tc.custom())
   ];
   const tp = groups.reduce((s, g) => s + g.passed, 0);
   const tt = groups.reduce((s, g) => s + g.total, 0);
@@ -3845,7 +3928,7 @@ function buildMatrixFilterBar() {
 
   const chips = document.createElement('div');
   chips.className = 'matrix-chips';
-  for (const p of ['F', 'M', 'R', 'N', 'X']) {
+  for (const p of shownPermCodes()) {
     const c = document.createElement('span');
     c.className = 'matrix-chip' + (matrixFilter.levels.has(p) ? ' active' : '');
     c.innerHTML = `<span class="sw cell-${p}"></span>${p}`;
@@ -4649,7 +4732,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
   const legend = document.createElement('div');
   legend.className = 'legend';
   legend.style.marginTop = '10px';
-  legend.innerHTML = ['F','M','R','N','X'].map(p =>
+  legend.innerHTML = shownPermCodes().map(p =>
     `<span><span class="swatch cell-${p}"></span>${p} — ${PERM_NAME[p]}</span>`
   ).join('');
   section.appendChild(legend);
@@ -4725,20 +4808,22 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
 
   const fieldLabelText = operationName ? `“${escapeHtml(operationName)}”` : `this record`;
 
-  // The record itself must allow what the target asks for: editing a field needs the record at
-  // Modify or higher, seeing it needs Read or higher. If it doesn't, no change to this field's
+  // The record itself must allow what the target asks for: editing a field needs the record to
+  // cover Modify, seeing it needs Read or higher. If it doesn't, no change to this field's
   // cells will be enough on its own — say so up front and offer the record-level view.
   // (Display only: the levers below still describe the field's spreadsheet value exactly.)
-  const recordNeed  = lim && tRank >= PERM_RANK.R ? (tRank >= PERM_RANK.M ? 'M' : 'R') : null;
-  const recordShort = !!recordNeed && PERM_RANK[lim.entityPerm] < PERM_RANK[recordNeed];
+  // The check stays Covers(Modify), so a sheet M still counts; M isn't a level in use, so the
+  // record is pointed at F.
+  const recordNeed  = lim && tRank >= PERM_RANK.R ? (tRank >= PERM_RANK.M ? 'F' : 'R') : null;
+  const recordShort = !!recordNeed && PERM_RANK[lim.entityPerm] < (recordNeed === 'F' ? PERM_RANK.M : PERM_RANK.R);
   if (recordShort) {
     const note = document.createElement('div');
     note.className = 'record-limit';
     note.style.marginBottom = '10px';
     note.innerHTML =
       `<strong>The record holds this field back.</strong> Even at <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong> on ${fieldLabelText}, ` +
-      `the record itself is only <strong>${lim.entityPerm} — ${PERM_NAME[lim.entityPerm]}</strong> for this user, so the field stays ${recordNeed === 'M' ? 'read-only' : 'hidden'}. ` +
-      `The record also needs <strong>${recordNeed} — ${PERM_NAME[recordNeed]}</strong> or higher. ` +
+      `the record itself is only <strong>${lim.entityPerm} — ${PERM_NAME[lim.entityPerm]}</strong> for this user, so the field stays ${PERM_RANK[lim.entityPerm] < PERM_RANK.R ? 'hidden' : 'read-only'}. ` +
+      `The record also needs <strong>${recordNeed} — ${PERM_NAME[recordNeed]}</strong>${recordNeed === 'F' ? '' : ' or higher'}. ` +
       `<button type="button" class="matrix-link-btn fc-record-link">Show how to raise the record</button>`;
     note.querySelector('.fc-record-link').addEventListener('click', () => {
       $('operation').value = '';
@@ -4747,7 +4832,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
     });
     advisor.appendChild(note);
   }
-  // A child-list Add / Remove button also needs the child record at Modify or higher.
+  // A child-list Add / Remove button also needs the child record to cover Modify — shown as F, as above.
   const childShort = !!(lim && lim.child) && tRank >= PERM_RANK.M && PERM_RANK[lim.child.perm] < PERM_RANK.M;
   if (childShort) {
     const c = lim.child, cn = escapeHtml(c.name), btn = buttonWord(c);
@@ -4758,7 +4843,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
     note.innerHTML =
       `<strong>The ${cn} record holds this button back.</strong> Even at <strong>${targetPerm} — ${PERM_NAME[targetPerm]}</strong> here, ` +
       `${cn} itself is only <strong>${c.perm} — ${PERM_NAME[c.perm]}</strong> for this user, so the ${btn} button on the ${cn} list isn't shown. ` +
-      `${cn} also needs <strong>M — Modify</strong> or higher. ` +
+      `${cn} also needs <strong>F — Full</strong>. ` +
       (staticIdx >= 0
         ? `<button type="button" class="matrix-link-btn fc-child-link">Show how to raise ${cn}</button>`
         : `${cn} has no block without conditions, so it uses the highest default access level among the user's roles — raise one of those, or add a block without conditions for ${cn}.`);
@@ -4766,7 +4851,7 @@ function renderFieldMode(block, operationName, rows, targetPerm, combined, lim) 
     if (link) link.addEventListener('click', () => {
       $('block').value = String(staticIdx); selectBlock();
       $('operation').value = '';
-      $('targetPerm').value = 'M';
+      $('targetPerm').value = 'F';
       runFieldCoverage();
     });
     advisor.appendChild(note);
