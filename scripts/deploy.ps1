@@ -6,15 +6,17 @@
 #
 #  What it does:
 #    1. Verifies all four release files exist locally, and that the server's share is reachable.
-#    2. Backs up the current site folder on LWPRODAPP-009.
-#    3. Stops the IIS app pool.
+#    2. Backs up the current site folder on LWPRODAPP-009 (to _backup_new, replacing _backup only once
+#       complete, so a failed backup keeps the previous one).
+#    3. Stops the IIS app pool (if it is running).
 #    4. Copies the four release files over UNC.
-#    5. Restarts the app pool (always, once it was stopped - even if the copy failed).
+#    5. Makes sure the app pool is running again - whenever step 2/3 reached the server, even if a
+#       later step failed or the connection dropped after the pool was stopped.
 #    6. Polls the site root for HTTP 200 to confirm it's up.
 #
 #  Stops at the first failure: a later step never runs after an earlier one failed, and the script ends
-#  with "Deployment FAILED" and exit code 1. The one exception is restarting the app pool, which still
-#  runs after a failed copy so the site isn't left down (it may then serve a mix of old and new files -
+#  with "Deployment FAILED" and exit code 1. The one exception is step 5, which still runs after a
+#  failure so the site isn't left down (after a failed copy it may serve a mix of old and new files -
 #  the failure message says which were copied).
 #
 #  Prerequisites on the local machine:
@@ -34,9 +36,12 @@ $sourceDir    = (Resolve-Path "$PSScriptRoot\..").Path
 $uncPath      = "\\$server\$($sitePath -replace '^([A-Za-z]):', '$1$')"
 $releaseFiles = @('index.html', 'SPEC.html', 'SPEC.md', 'web.config')
 
-$poolStopped = $false   # once true, the app pool must be started again whatever happens next
-$copied      = @()
-$failure     = $null
+$stopAttempted = $false   # step 1 reached the server: the pool MAY be stopped even if step 1 failed
+$poolStopped   = $false   # step 1 confirmed the pool is stopped
+$poolAfter     = $null    # the pool's state reported by step 3 ('Started', or $null if it couldn't be checked)
+$copied        = @()
+$failure       = $null
+$session       = $null
 
 try {
     # -- Pre-flight: every release file present locally, server share reachable --
@@ -57,33 +62,55 @@ try {
 
     # -- Step 1: Backup current site + stop the app pool --
     Write-Host "[prod] Backing up site and stopping app pool '$appPool' ..." -ForegroundColor Cyan
-    Invoke-Command -ComputerName $server -ErrorAction Stop -ArgumentList $sitePath, $appPool -ScriptBlock {
+    # Connect first: if the session can't even be opened, nothing on the server was touched ("not changed").
+    # Once it is open, a failure may come after the remote stop (e.g. the connection drops), so step 3 must
+    # check the pool rather than the script reporting "not changed" for a site that is down.
+    $session = New-PSSession -ComputerName $server -ErrorAction Stop
+    $stopAttempted = $true
+    Invoke-Command -Session $session -ErrorAction Stop -ArgumentList $sitePath, $appPool -ScriptBlock {
         param($sitePath, $appPool)
         $ErrorActionPreference = 'Stop'   # the remote session has its own preference
         Import-Module WebAdministration
 
+        # The new backup goes to _backup_new and only replaces the old one once it is complete, so a
+        # failed backup never destroys the last good rollback point.
         $backupPath = "${sitePath}_backup"
+        $newBackup  = "${sitePath}_backup_new"
         if (Test-Path $sitePath) {
-            if (Test-Path $backupPath) { Remove-Item $backupPath -Recurse -Force }
-            robocopy $sitePath $backupPath /E /NP /NFL /NDL | Out-Null
+            if (Test-Path $newBackup) { Remove-Item $newBackup -Recurse -Force }   # left by an earlier failed run
+            robocopy $sitePath $newBackup /E /NP /NFL /NDL | Out-Null
             # robocopy: 0-7 = success (files copied / nothing to copy / extras), 8+ = at least one failure
-            if ($LASTEXITCODE -ge 8) { throw "Backup failed (robocopy exit code $LASTEXITCODE) - app pool not stopped." }
+            if ($LASTEXITCODE -ge 8) {
+                $code = $LASTEXITCODE
+                Remove-Item $newBackup -Recurse -Force -ErrorAction SilentlyContinue
+                throw "Backup failed (robocopy exit code $code) - the previous backup was kept and the app pool was not stopped."
+            }
+            if (Test-Path $backupPath) { Remove-Item $backupPath -Recurse -Force }
+            Rename-Item -Path $newBackup -NewName (Split-Path $backupPath -Leaf)
             Write-Host "  Backup written to $backupPath"
         }
 
-        try {
-            Stop-WebAppPool -Name $appPool
-            $deadline = (Get-Date).AddSeconds(30)
-            while ((Get-WebAppPoolState -Name $appPool).Value -ne 'Stopped') {
-                if ((Get-Date) -gt $deadline) { throw "App pool '$appPool' did not stop within 30 s." }
-                Start-Sleep -Seconds 1
+        # Act on the pool's real state: it may already be stopped (by hand, or by an earlier failed run).
+        $state = (Get-WebAppPoolState -Name $appPool).Value
+        if ($state -eq 'Stopped') {
+            Write-Host "  App pool was already stopped."
+        } else {
+            try {
+                $stopSent = $false
+                $deadline = (Get-Date).AddSeconds(30)
+                while (($now = (Get-WebAppPoolState -Name $appPool).Value) -ne 'Stopped') {
+                    # Stop only a running pool; one still 'Starting' is stopped once it gets there.
+                    if ($now -eq 'Started' -and -not $stopSent) { Stop-WebAppPool -Name $appPool; $stopSent = $true; continue }
+                    if ((Get-Date) -gt $deadline) { throw "App pool '$appPool' did not stop within 30 s (it was '$state', now '$now')." }
+                    Start-Sleep -Seconds 1
+                }
+            } catch {
+                # Don't leave the site down because the stop half-worked.
+                try { if ((Get-WebAppPoolState -Name $appPool).Value -ne 'Started') { Start-WebAppPool -Name $appPool } } catch { }
+                throw
             }
-        } catch {
-            # Don't leave the site down because the stop half-worked.
-            try { Start-WebAppPool -Name $appPool } catch { }
-            throw
+            Write-Host "  App pool stopped."
         }
-        Write-Host "  App pool stopped."
     }
     $poolStopped = $true
 
@@ -99,20 +126,27 @@ catch {
     $failure = $_
 }
 finally {
-    # -- Step 3: Restart the app pool - always, once it was stopped --
-    if ($poolStopped) {
-        Write-Host "[prod] Starting app pool '$appPool' ..." -ForegroundColor Cyan
+    # -- Step 3: Make sure the app pool is running - whenever step 1 reached the server --
+    # Checks the real state rather than assuming: after a failed step 1 the pool may or may not be stopped.
+    if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue }
+    if ($stopAttempted) {
+        Write-Host "[prod] Making sure app pool '$appPool' is running ..." -ForegroundColor Cyan
         try {
-            Invoke-Command -ComputerName $server -ErrorAction Stop -ArgumentList $appPool -ScriptBlock {
+            $poolAfter = Invoke-Command -ComputerName $server -ErrorAction Stop -ArgumentList $appPool -ScriptBlock {
                 param($appPool)
                 $ErrorActionPreference = 'Stop'
                 Import-Module WebAdministration
-                Start-WebAppPool -Name $appPool
-                Write-Host "  App pool started."
+                if ((Get-WebAppPoolState -Name $appPool).Value -eq 'Started') {
+                    Write-Host "  App pool is running."
+                } else {
+                    Start-WebAppPool -Name $appPool
+                    Write-Host "  App pool started."
+                }
+                (Get-WebAppPoolState -Name $appPool).Value
             }
         } catch {
-            Write-Host "[prod] Could not start app pool '$appPool': $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "[prod] THE SITE IS DOWN - start the pool on $server by hand." -ForegroundColor Red
+            Write-Host "[prod] Could not check or start app pool '$appPool': $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[prod] THE SITE MAY BE DOWN - check the pool on $server and start it by hand." -ForegroundColor Red
             if (-not $failure) { $failure = $_ }
         }
     }
@@ -127,6 +161,11 @@ if ($failure) {
         if ($copied -and $notCopied) {
             Write-Host "[prod] The site now mixes new and old files. Re-run the deploy, or restore ${sitePath}_backup on $server." -ForegroundColor Red
         }
+    } elseif ($stopAttempted) {
+        # Step 1 failed on or on the way to the server: no file was copied, but the pool may have been
+        # stopped. Step 3 above says what it found.
+        $poolNote = if ($poolAfter -eq 'Started') { 'the app pool is running' } else { "the app pool's state is unknown" }
+        Write-Host "[prod] No files were copied; $poolNote." -ForegroundColor Red
     } else {
         Write-Host "[prod] The site was not changed." -ForegroundColor Red
     }
