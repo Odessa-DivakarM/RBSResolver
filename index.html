@@ -2092,13 +2092,21 @@ if (siteSel) siteSel.addEventListener('change', e => {
 //   then ParseAccessMode throws for anything outside Undefined 0 · None 1 · Read 2 · Modify 3 · Full 4.
 // Returns a code, or null where the framework throws.
 // .NET's char.IsWhiteSpace set, which String.Trim and IsNullOrWhiteSpace use (JS \s and trim() differ: U+FEFF, U+0085).
-const NET_WS = '\u0009-\u000D \u0085   -     　';
-const NET_BLANK = new RegExp(`^[${NET_WS}]*$`), NET_TRIM = new RegExp(`^[${NET_WS}]+|[${NET_WS}]+$`, 'g');
-const netTrim = (s) => s.replace(NET_TRIM, '');
+// Built from code points, not typed: these characters are invisible and editors change them silently.
+const NET_WS = new Set([0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0x85, 0xA0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A,
+  0x2028, 0x2029, 0x202F, 0x205F, 0x3000]);
+const isNetBlank = (s) => { for (let i = 0; i < s.length; i++) if (!NET_WS.has(s.charCodeAt(i))) return false; return true; };
+const netTrim = (s) => {
+  let a = 0, b = s.length;
+  while (a < b && NET_WS.has(s.charCodeAt(a))) a++;
+  while (b > a && NET_WS.has(s.charCodeAt(b - 1))) b--;
+  return s.slice(a, b);
+};
 const ACCESS_MODE = new Map([['undefined', 0], ['none', 1], ['read', 2], ['modify', 3], ['full', 4]]);
 const ACCESS_CODE = ['X', 'N', 'R', 'M', 'F'];
 function frameworkParsePermission(s) {
-  if (s == null || NET_BLANK.test(s)) return 'X';
+  if (s == null || isNetBlank(s)) return 'X';
   if (s.length === 1) return ({ x: 'X', X: 'X', n: 'N', N: 'N', r: 'R', R: 'R', m: 'M', M: 'M', f: 'F', F: 'F' })[s] || null;
   const t = netTrim(s);
   let v;
@@ -2123,7 +2131,7 @@ function frameworkParsePermission(s) {
 // 65,535 characters); scripts/export-users.ps1 writes the JSON itself. Either is accepted.
 const CUT_OFF = "The result looks cut off. In SSMS click the link in the result and copy from the tab that opens. If it is still cut off there (a few thousand users or more), set Tools › Options › Query Results › SQL Server › Results to Grid › XML data to Unlimited, then run the script again in a new query window.";
 function unwrapUsersText(text) {
-  let t = String(text).replace(/^﻿/, '').trim();
+  let t = String(text); if (t.charCodeAt(0) === 0xFEFF) t = t.slice(1); t = t.trim();
   // "Copy with Headers" in SSMS puts the column name first; start at the result itself.
   const at = t.indexOf('<?rbs-users');
   if (at > 0 && !t.startsWith('<?xml')) t = t.slice(at);
@@ -2155,7 +2163,7 @@ function parseUserImport(text) {
     const raw = r.defaultPermission == null ? '' : String(r.defaultPermission);
     // PermissionValues.IsX is an exact 'X'; only that means "use the site default". A blank stored value
     // becomes '_' (AbstractEnum.Value), which Permission.Parse can't read.
-    const code = NET_BLANK.test(raw) ? null : raw === 'X' ? 'X' : frameworkParsePermission(raw);
+    const code = isNetBlank(raw) ? null : raw === 'X' ? 'X' : frameworkParsePermission(raw);
     roleDefaults.set(r.name.toLowerCase(), { name: r.name, raw, code });
   }
   const users = doc.users.filter(u => u && u.id != null).map(u => {
@@ -2166,7 +2174,7 @@ function parseUserImport(text) {
       const d = roleDefaults.get(name.toLowerCase());
       if (!d) { blockers.push(`role “${escapeHtml(name)}” is missing from the file's role list`); continue; }
       if (d.code === null) {
-        blockers.push(NET_BLANK.test(d.raw) ? `role “${escapeHtml(d.name)}” has a blank default, which Odessa can't read`
+        blockers.push(isNetBlank(d.raw) ? `role “${escapeHtml(d.name)}” has a blank default, which Odessa can't read`
           : `role “${escapeHtml(d.name)}” has a default Odessa can't read (“${escapeHtml(d.raw)}”)`);
         continue;
       }
@@ -4136,11 +4144,18 @@ function runTests() {
     return parseUserImport(JSON.stringify(d));
   };
   const plain = (s) => s.replace(/<[^>]+>/g, '');
+  const BOM = String.fromCharCode(0xFEFF); // built, not typed: an invisible character is easy to lose
   const withImportState = (fn) => {
     const sel = $('siteLevelDefault');
     const saved = { roles: userRoles.slice(), site: siteLevelDefault, selHtml: sel.innerHTML, selValue: sel.value, modified: rolesUserModified,
-      users: importedUsers, user: importedUser, notes: $('userNotes').innerHTML, ret: traceReturn, pick: $('userPick').value };
+      users: importedUsers, user: importedUser, notes: $('userNotes').innerHTML, ret: traceReturn, pick: $('userPick').value,
+      // the panel itself, for the cases that click through it
+      empty: $('usersEmpty').hidden, loaded: $('usersLoaded').hidden, paste: $('usersPaste').value, msg: $('usersMsg').textContent,
+      list: $('usersList').innerHTML, info: $('usersInfo').textContent, back: $('cancelUsers').hidden };
     try { return fn(); } finally {
+      $('usersEmpty').hidden = saved.empty; $('usersLoaded').hidden = saved.loaded; $('usersPaste').value = saved.paste;
+      $('usersMsg').textContent = saved.msg; $('usersList').innerHTML = saved.list; $('usersInfo').textContent = saved.info;
+      $('cancelUsers').hidden = saved.back;
       userRoles.splice(0, userRoles.length, ...saved.roles);
       siteLevelDefault = saved.site; sel.innerHTML = saved.selHtml; sel.value = saved.selValue;
       rolesUserModified = saved.modified; importedUsers = saved.users; importedUser = saved.user;
@@ -4150,8 +4165,8 @@ function runTests() {
   };
   const importCases = [
     { name: 'Permission.Parse: one letter in either case; anything else of length 1 is an error', custom: () => parseTable([
-      ['f', 'F'], ['F', 'F'], ['x', 'X'], ['m', 'M'], ['R', 'R'], ['n', 'N'], ['_', null], ['3', null], ['Y', null], ['K', null], ['﻿', null]]) },
-    { name: 'Permission.Parse: blank or .NET whitespace is Undefined', custom: () => parseTable([['', 'X'], ['   ', 'X'], ['\t', 'X'], ['\u0085 ', 'X']]) },
+      ['f', 'F'], ['F', 'F'], ['x', 'X'], ['m', 'M'], ['R', 'R'], ['n', 'N'], ['_', null], ['3', null], ['Y', null], [String.fromCharCode(0x212A), null], [String.fromCharCode(0xFEFF), null]]) },
+    { name: 'Permission.Parse: blank or .NET whitespace is Undefined', custom: () => parseTable([['', 'X'], ['   ', 'X'], ['\t', 'X'], [String.fromCharCode(0x85, 0xA0), 'X'], [String.fromCharCode(0x2028, 0x3000), 'X']]) },
     { name: 'Permission.Parse: longer values are AccessMode names (ASCII case ignored, trimmed), Int32 numbers or OR\'d comma lists, then 0..4 only', custom: () => parseTable([
       ['Full', 'F'], ['full', 'F'], [' Full ', 'F'], ['Full\u0085', 'F'], ['Undefined', 'X'], ['MODIFY', 'M'], ['None', 'N'], ['Fulll', null], ['f ', null], ['X ', null],
       ['constructor', null], ['__proto__', null], ['04', 'F'], [' 0004 ', 'F'], ['-0', 'X'], ['+2', 'R'], ['05', null], ['-1', null], ['1e1', null], ['99999999999', null],
@@ -4164,7 +4179,7 @@ function runTests() {
       // The SQL writes "?>" as "?>" inside JSON strings; put that escape into the JSON text itself.
       const json = usersDoc({ roles: [{ name: 'Clerk', defaultPermission: 'R' }, { name: 'Manager#X', defaultPermission: 'X' }] }).replace('Manager#X', 'Manager?\\u003eX');
       const same = (t) => { const r = parseUserImport(t); return !r.error && JSON.stringify(r.data.users) === JSON.stringify(parseUserImport(json).data.users); };
-      const forms = [json, `<?rbs-users ${json}?>`, `﻿<?rbs-users ${json}?>\r\n`, `<?xml version="1.0" encoding="utf-16"?>\n<?rbs-users ${json}?>`];
+      const forms = [json, `<?rbs-users ${json}?>`, `${BOM}<?rbs-users ${json}?>\r\n`, `<?xml version="1.0" encoding="utf-16"?>\n<?rbs-users ${json}?>`];
       const bad = forms.map((f, i) => same(f) ? null : i).filter(i => i !== null);
       const name = JSON.parse(json).roles[1].name;
       return { ok: !bad.length && name === 'Manager?>X', detail: bad.length ? `form(s) ${bad.join(', ')} differ` : `${forms.length} forms, "${name}"` };
@@ -4177,12 +4192,40 @@ function runTests() {
       const text = `<?rbs-users ${usersDoc({ roles: [{ name: 'Clérk', defaultPermission: 'R' }] })}?>`;
       const le = new Uint8Array(2 + text.length * 2); le[0] = 0xFF; le[1] = 0xFE;
       for (let i = 0; i < text.length; i++) { le[2 + i * 2] = text.charCodeAt(i) & 255; le[3 + i * 2] = text.charCodeAt(i) >> 8; }
-      const utf8 = new TextEncoder().encode('﻿' + text);
+      const utf8 = new TextEncoder().encode(BOM + text);
       // A Windows ("ANSI") save: é is the single byte 0xE9, which isn't valid UTF-8.
       const ansi = Uint8Array.from(text, ch => ch.charCodeAt(0) < 256 ? ch.charCodeAt(0) : 63);
-      const ok = decodeUsersFile(le.buffer).replace(/^﻿/, '') === text && decodeUsersFile(utf8.buffer) === text && decodeUsersFile(ansi.buffer) === text;
+      const ok = decodeUsersFile(le.buffer).replace(BOM, '') === text && decodeUsersFile(utf8.buffer) === text && decodeUsersFile(ansi.buffer) === text;
       return { ok, detail: ok ? 'UTF-16LE, UTF-8 (with BOM) and Windows-1252 all decode' : 'decode mismatch' };
     } },
+    { name: 'Pick a user: choosing a list entry fills the user in; typing part of a name only filters the list', custom: () => withImportState(() => {
+      const d = JSON.parse(usersDoc());
+      d.users.push(Object.assign({}, d.users[0], { id: 2, loginName: 'amelia', fullName: 'Amelia', roles: [{ name: 'Clerk' }] }));
+      loadUsersText(JSON.stringify(d)); importedUser = null;
+      const box = $('userPick'), type = (v) => { box.value = v; box.dispatchEvent(new Event('input')); };
+      type('am'); const partial = importedUser === null;
+      type(userPickLabel(importedUsers.users[1])); const picked = importedUser && importedUser.id === 2 && userRoles.map(x => x.name).join() === 'Clerk';
+      return { ok: partial && picked && $('usersList').options.length === 2, detail: `partial ignored=${partial}, exact label picked=${picked}` };
+    }) },
+    { name: 'Use pasted result: a good paste loads the users and empties the box; a bad one keeps the text and says why', custom: () => withImportState(() => {
+      $('usersEmpty').hidden = false; $('usersLoaded').hidden = true;
+      $('usersPaste').value = 'not a result'; $('usePastedUsers').click();
+      const bad = $('usersPaste').value === 'not a result' && !!$('usersMsg').textContent;
+      $('usersPaste').value = `rbsUsers\r\n<?rbs-users ${usersDoc()}?>\r\n`; $('usePastedUsers').click();
+      const good = $('usersPaste').value === '' && !$('usersLoaded').hidden && $('usersEmpty').hidden && importedUsers.users.length === 1;
+      $('usersPaste').value = '   '; $('changeUsers').click(); $('usePastedUsers').click();
+      const empty = /first/.test($('usersMsg').textContent);
+      return { ok: bad && good && empty, detail: `bad paste kept=${bad}, good paste loaded=${good}, empty box asked=${empty}` };
+    }) },
+    { name: 'Load another result shows the steps with a way back; Back returns to the same loaded users', custom: () => withImportState(() => {
+      const loaded = loadUsersText(usersDoc()) === true && !!importedUsers;
+      const before = importedUsers;
+      $('changeUsers').click();
+      const steps = !$('usersEmpty').hidden && $('usersLoaded').hidden && !$('cancelUsers').hidden;
+      $('cancelUsers').click();
+      const back = $('usersEmpty').hidden && !$('usersLoaded').hidden && importedUsers === before;
+      return { ok: loaded && steps && back, detail: `loaded=${loaded}, steps shown=${steps}, back to the same list=${back}` };
+    }) },
     { name: 'query result copied with its column header ("Copy with Headers") still loads', custom: () => {
       const json = usersDoc(), r = parseUserImport(`rbsUsers\r\n<?rbs-users ${json}?>\r\n`);
       return { ok: !r.error && r.data.users.length === 1, detail: r.error || `${r.data.users.length} user` };
@@ -4746,7 +4789,7 @@ function csvCell(v) {
 
 function downloadCSV(text, filename) {
   // Prepend UTF-8 BOM so Excel auto-detects encoding.
-  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([String.fromCharCode(0xFEFF) + text], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
