@@ -5,14 +5,14 @@
 #      powershell -ExecutionPolicy Bypass -File .\scripts\deploy.ps1
 #
 #  What it does:
-#    1. Verifies all four release files exist locally, and that the server's share is reachable.
+#    1. Verifies all five release files exist locally, and that the server's share is reachable.
 #    2. Backs up the current site folder on LWPRODAPP-009 (to _backup_new, replacing _backup only once
 #       complete, so a failed backup keeps the previous one).
 #    3. Stops the IIS app pool (if it is running).
-#    4. Copies the four release files over UNC.
+#    4. Copies the five release files over UNC (creating scripts\ on the server if needed).
 #    5. Makes sure the app pool is running again - whenever step 2/3 reached the server, even if a
 #       later step failed or the connection dropped after the pool was stopped.
-#    6. Polls the site root for HTTP 200 to confirm it's up.
+#    6. Polls the site root for HTTP 200 to confirm it's up, then checks the SQL script is served.
 #
 #  Stops at the first failure: a later step never runs after an earlier one failed, and the script ends
 #  with "Deployment FAILED" and exit code 1. The one exception is step 5, which still runs after a
@@ -34,7 +34,8 @@ $baseUrl  = 'http://rbsresolver.s009.odessacore.local'
 
 $sourceDir    = (Resolve-Path "$PSScriptRoot\..").Path
 $uncPath      = "\\$server\$($sitePath -replace '^([A-Za-z]):', '$1$')"
-$releaseFiles = @('index.html', 'SPEC.html', 'SPEC.md', 'web.config')
+# scripts\export-users.sql is downloaded from the app ("Users from Odessa"), so it ships too, at the same path.
+$releaseFiles = @('index.html', 'SPEC.html', 'SPEC.md', 'web.config', 'scripts\export-users.sql')
 
 $stopAttempted = $false   # step 1 reached the server: the pool MAY be stopped even if step 1 failed
 $poolStopped   = $false   # step 1 confirmed the pool is stopped
@@ -114,9 +115,11 @@ try {
     }
     $poolStopped = $true
 
-    # -- Step 2: Copy the four release files over UNC (stops at the first failed file) --
+    # -- Step 2: Copy the five release files over UNC (stops at the first failed file) --
     Write-Host "[prod] Copying files ..." -ForegroundColor Cyan
     foreach ($file in $releaseFiles) {
+        $destDir = Split-Path "$uncPath\$file" -Parent
+        if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir | Out-Null }
         Copy-Item -Path "$sourceDir\$file" -Destination "$uncPath\$file" -Force
         $copied += $file
         Write-Host "       copied  $file" -ForegroundColor Gray
@@ -186,6 +189,20 @@ while ((Get-Date) -lt $deadline) {
 
 Write-Host ""
 if ($ok) {
+    # The app links to the SQL script; IIS must serve it (a .sql mapping in web.config), or the browser
+    # would save an IIS error page as export-users.sql.
+    $sqlUrl = "$baseUrl/scripts/export-users.sql"
+    $sqlWhy = $null
+    try {
+        $s = Invoke-WebRequest -Uri $sqlUrl -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        $body = if ($s.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($s.Content) } else { [string]$s.Content }
+        if ($s.StatusCode -ne 200) { $sqlWhy = "HTTP $($s.StatusCode)" }
+        elseif (-not $body.TrimStart().StartsWith('/*')) { $sqlWhy = 'the response is not the SQL script' }
+    } catch { $sqlWhy = $_.Exception.Message }
+    if ($sqlWhy) {
+        Write-Host "[prod] Deployment FAILED: the site is up, but $sqlUrl is not served as the SQL script ($sqlWhy). Check the .sql mapping and request filtering in IIS." -ForegroundColor Red
+        exit 1
+    }
     Write-Host "[prod] Deployment complete - site is up at $baseUrl" -ForegroundColor Green
     exit 0
 }

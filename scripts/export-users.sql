@@ -1,21 +1,33 @@
 /*
-  RBS Resolver — export users, their login roles and the site-level default as one JSON document.
+  RBS Resolver - export users, their login roles and the site-level default as one JSON document.
 
   READ-ONLY: a single SELECT. Nothing is written to the database.
   Needs SQL Server 2016 or later (FOR JSON, JSON_QUERY). Nothing from 2017+ is used.
 
-  Run it with scripts/export-users.ps1, which writes the result to a file. In SSMS the grid cuts long text
-  at 65,535 characters, so SSMS is only good for a single user (set @LoginName below).
+  HOW TO USE (SSMS):
+    1. Open this file in SQL Server Management Studio, connected to the Odessa database, and run it (F5)
+       with results to a grid (the default; Results to Text or File cuts it at 8,192 characters).
+    2. The result is one cell with a link that starts <?rbs-users {"format":"rbs-users/1"... Click it: SSMS
+       opens the whole result in a new tab.
+    3. In RBS Resolver, under "Users from Odessa", paste it (Ctrl+A, Ctrl+C in that tab), or save the tab
+       (Ctrl+S) and load the saved file.
+  SSMS opens XML results of up to 2 MB by default: a few thousand users, fewer when users have many roles
+  (about 0.5-1 KB per user). If the result is cut off, set Tools > Options >
+  Query Results > SQL Server > Results to Grid > XML data to Unlimited and run it again in a new query window. The result is XML
+  only so that SSMS shows all of it: a plain text cell is cut at 65,535 characters. RBS Resolver removes the <?rbs-users ... ?>
+  wrapper. scripts/export-users.ps1 runs this same query and writes the file for you.
+
+  The file lists every login and its roles: keep it private.
 
   What it mirrors in Odessa.Framework (Lw.Domain.Base.Extension):
-    - A user's roles: Components/RolesForUser/GetRolesForUser.cs — the roles login loads:
-        RolesForUsers ⋈ Roles ⋈ RoleFunctions, all three IsActive. No date checks, no approval check.
+    - A user's roles: Components/RolesForUser/GetRolesForUser.cs - the roles login loads:
+        RolesForUsers join Roles join RoleFunctions, all three IsActive. No date checks, no approval check.
     - Every user is exported, including ones who can't log in. Among other checks (site access, user type,
-      domain, password, licence — not exported), login (Services/Security/SecurityService.cs LoginUser,
+      domain, password, licence - not exported), login (Services/Security/SecurityService.cs LoginUser,
       Lw.Domain.Base/Behaviors/UserLoginAuditBehavior.xaml) refuses a user who:
         - isn't exactly 'Approved';
         - has no active role (UserContextHelper throws InvalidRolesForUser), or a role default or site default
-          Permission.Parse can't read — a blank role default is stored back as '_' (AbstractEnum.Value), which
+          Permission.Parse can't read - a blank role default is stored back as '_' (AbstractEnum.Value), which
           can't be read either;
         - is blocked: LoginBlockedTime set, IsLoginBlocked, and IsAdminBlocked or a lockout of 0 minutes or
           still inside LoginBlockedTime + AccountLockoutDurationInMins (SecurityConfigs, first row);
@@ -40,7 +52,7 @@ SET LOCK_TIMEOUT 30000;   -- fail after 30 s rather than wait behind a long writ
 DECLARE @LoginName nvarchar(100) = NULL;   -- NULL = every user; or one login name, e.g. N'jdoe'
 -- </parameters>
 
-SELECT (
+DECLARE @json nvarchar(max) = (
   SELECT
     'rbs-users/1'                                    AS [format],
     CONVERT(varchar(33), SYSDATETIMEOFFSET(), 127)   AS [exportedAt],
@@ -87,4 +99,17 @@ SELECT (
        ORDER BY u.LoginName, u.Id
          FOR JSON PATH, INCLUDE_NULL_VALUES), N'[]')) AS [users]
   FOR JSON PATH, WITHOUT_ARRAY_WRAPPER, INCLUDE_NULL_VALUES
-) AS rbsUsersJson;
+);
+
+-- <result> (export-users.ps1 replaces this block with SELECT @json, so it doesn't depend on XML)
+-- One XML value, <?rbs-users {...json...}?>, so SSMS shows all of it behind a link. Three things in the JSON
+-- can't go into it, and each is written as a JSON \u escape instead (the same text to a JSON reader):
+-- "?" followed by ">" (it would end the wrapper), and the characters U+FFFE and U+FFFF (not allowed in XML).
+-- They can only occur inside JSON strings. The backslash is NCHAR(92) so no editor turns the escapes back.
+DECLARE @bs nchar(1) = NCHAR(92);
+SELECT (SELECT REPLACE(REPLACE(REPLACE(@json COLLATE Latin1_General_BIN2,
+         N'?' + NCHAR(62), N'?' + @bs + N'u003e'),
+         NCHAR(65534), @bs + N'ufffe'),
+         NCHAR(65535), @bs + N'uffff')
+         AS [processing-instruction(rbs-users)] FOR XML PATH(''), TYPE) AS [rbsUsers];
+-- </result>

@@ -36,6 +36,10 @@ try {
   $pattern = '(?s)-- <parameters>.*?-- </parameters>'
   if ($sql -notmatch $pattern) { throw "The <parameters> block is missing from $sqlPath." }
   $sql = [regex]::Replace($sql, $pattern, '')
+  # The .sql ends with an XML wrapper for SSMS; here the JSON itself is read instead.
+  $resultPattern = '(?s)-- <result>.*?-- </result>'
+  if ($sql -notmatch $resultPattern) { throw "The <result> block is missing from $sqlPath." }
+  $sql = [regex]::Replace($sql, $resultPattern, 'SELECT @json AS [rbsUsersJson];')
 
   $csb = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
   $csb['Data Source'] = $Server

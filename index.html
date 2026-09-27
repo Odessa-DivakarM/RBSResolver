@@ -283,6 +283,15 @@ body.pane-dragging { cursor: col-resize; user-select: none; }
   border-radius: 4px;
   background: var(--surface-input);
 }
+.users-steps { margin: 6px 0 8px; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.users-steps li { margin-bottom: 3px; }
+.users-steps a { color: var(--accent); font-weight: 600; }
+#usersPaste {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface-input); color: var(--text);
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-size: 11px;
+}
 .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
 .tab {
   padding: 6px 12px;
@@ -819,11 +828,22 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
       </div>
     </div>
     <div class="panel" id="usersPanel">
-      <h2>Users from Odessa<span class="tip" tabindex="0" data-tip="A file made by scripts/export-users.ps1 (in the RBS Resolver repository) from your Odessa database: every user, the roles login gives them, each role's default access level and the site default. Pick a user to fill in who the user is. The file is read in this browser only and never uploaded.">?</span></h2>
-      <input type="file" id="usersFile" accept=".json,application/json" hidden>
+      <h2>Users from Odessa<span class="tip" tabindex="0" data-tip="A read-only query of your Odessa database lists every user, the roles login gives them, each role's default access level and the site default. Pick a user to fill in who the user is. The result is read in this browser only and never uploaded.">?</span></h2>
+      <input type="file" id="usersFile" accept=".json,.xml,.txt,application/json,text/xml,text/plain" hidden>
       <div id="usersEmpty">
-        <button class="secondary" id="loadUsers" style="width:100%;" title="Load a .rbs-users.json file made by scripts/export-users.ps1">Load users file (.json)</button>
-        <p class="muted-note" id="usersMsg">Optional. Fills in a user's roles and the site default for you.</p>
+        <p class="muted-note" style="margin-top:0;">Optional. Fills in a user's roles and the site default for you.</p>
+        <ol class="users-steps">
+          <li><a href="scripts/export-users.sql" download="export-users.sql" id="downloadUsersSql">Download the SQL script</a> and run it in SQL Server Management Studio on the Odessa database. It only reads.</li>
+          <li>Click the link in the result. SSMS opens the whole result in a new tab: copy it all (Ctrl+A, Ctrl+C).</li>
+          <li>Paste it here, or load it saved as a file.</li>
+        </ol>
+        <textarea id="usersPaste" rows="3" placeholder="Paste the query result here" spellcheck="false" aria-label="Query result"></textarea>
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <button class="secondary" id="usePastedUsers" style="flex:1;">Use pasted result</button>
+          <button class="secondary" id="loadUsers" style="flex:1;" title="Load the result saved as a file (.xml, .json or .txt)">Load file</button>
+        </div>
+        <button class="secondary" id="cancelUsers" style="margin-top:6px;" hidden>Back to the loaded users</button>
+        <p class="muted-note" id="usersMsg" role="status"></p>
       </div>
       <div id="usersLoaded" hidden>
         <div class="field">
@@ -833,7 +853,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
         </div>
         <div id="userNotes"></div>
         <p class="muted-note" id="usersInfo"></p>
-        <button class="secondary" id="changeUsers" title="Load a different users file">Load another file</button>
+        <button class="secondary" id="changeUsers" title="Paste or load a different query result">Load another result</button>
       </div>
     </div>
     <div class="panel" id="systemPanel" style="display:none;">
@@ -2099,12 +2119,27 @@ function frameworkParsePermission(s) {
 
 // Checks a users file and resolves what login would give each user. Pure: no DOM, no globals.
 // → { error } for a file that can't be used, else { data, warnings }.
+// The SQL returns the JSON wrapped as <?rbs-users {…}?> so SSMS shows all of it (a plain text cell is cut at
+// 65,535 characters); scripts/export-users.ps1 writes the JSON itself. Either is accepted.
+const CUT_OFF = "The result looks cut off. In SSMS click the link in the result and copy from the tab that opens. If it is still cut off there (a few thousand users or more), set Tools › Options › Query Results › SQL Server › Results to Grid › XML data to Unlimited, then run the script again in a new query window.";
+function unwrapUsersText(text) {
+  let t = String(text).replace(/^﻿/, '').trim();
+  // "Copy with Headers" in SSMS puts the column name first; start at the result itself.
+  const at = t.indexOf('<?rbs-users');
+  if (at > 0 && !t.startsWith('<?xml')) t = t.slice(at);
+  if (!t.startsWith('<')) return { json: t };
+  const m = /^(?:<\?xml[^?]*\?>\s*)?<\?rbs-users\s([\s\S]*)\?>$/.exec(t);
+  if (m) return { json: m[1] };
+  return { error: /^<\?rbs-users\s/.test(t) ? CUT_OFF : "This isn't the result of the users query." };
+}
 function parseUserImport(text) {
+  const unwrapped = unwrapUsersText(text);
+  if (unwrapped.error) return { error: unwrapped.error };
   let doc;
-  try { doc = JSON.parse(text); } catch (e) { return { error: "This isn't a JSON file." }; }
-  if (!doc || doc.format !== 'rbs-users/1') {
-    return { error: 'This is not a users file from scripts/export-users.ps1 (expected format "rbs-users/1").' };
+  try { doc = JSON.parse(unwrapped.json); } catch (e) {
+    return { error: /^\{\s*"format"\s*:\s*"rbs-users\\?\/1"/.test(unwrapped.json) ? CUT_OFF : "This isn't the result of the users query." };
   }
+  if (!doc || doc.format !== 'rbs-users/1') return { error: "This isn't the result of the users query." };
   if (!Array.isArray(doc.roles) || !Array.isArray(doc.users)) return { error: 'The users file has no roles or users list.' };
   const warnings = [];
   // Site default: no row → "Full" (UserContextHelper.FetchUserRoles); otherwise parsed as stored.
@@ -2254,23 +2289,46 @@ function setSiteLevelDefault(code) {
   siteLevelDefault = code;
 }
 
+// Shows the users from a query result, or says why it can't be used. Returns true when loaded.
+function loadUsersText(text, from) {
+  const result = parseUserImport(text);
+  if (result.error) {
+    $('usersMsg').textContent = from ? `${from}: ${result.error}` : result.error;
+    $('usersEmpty').hidden = false; $('usersLoaded').hidden = true;
+    return false;
+  }
+  $('usersMsg').textContent = '';
+  showUsersFile(result);
+  return true;
+}
+// A saved SSMS tab may be UTF-16 (with a byte order mark) or UTF-8; decode by the mark.
+// Without a mark it is UTF-8, unless that fails: then the Windows code page (an "ANSI" save), rather than
+// quietly turning accented names into "?" and losing their match with the workbook's role columns.
+function decodeUsersFile(buf) {
+  const b = new Uint8Array(buf);
+  if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(b);
+  if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(b);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { return new TextDecoder('windows-1252').decode(b); }
+}
 function loadUsersFile(f) {
   if (!f) return;
   const reader = new FileReader();
-  reader.onload = () => {
-    const result = parseUserImport(String(reader.result));
-    if (result.error) {
-      $('usersMsg').textContent = `${f.name}: ${result.error}`;
-      $('usersEmpty').hidden = false; $('usersLoaded').hidden = true;
-      return;
-    }
-    showUsersFile(result);
-  };
+  reader.onload = () => loadUsersText(decodeUsersFile(reader.result), f.name);
   reader.onerror = () => { $('usersMsg').textContent = `Couldn't read ${f.name}.`; };
-  reader.readAsText(f);
+  reader.readAsArrayBuffer(f);
 }
 $('loadUsers').addEventListener('click', () => $('usersFile').click());
-$('changeUsers').addEventListener('click', () => $('usersFile').click());
+$('usePastedUsers').addEventListener('click', () => {
+  const box = $('usersPaste');
+  if (!box.value.trim()) { $('usersMsg').textContent = 'Paste the query result into the box first.'; return; }
+  if (loadUsersText(box.value)) box.value = ''; // don't keep every login in the page longer than needed
+});
+// "Load another" goes back to the steps, so the next result can be pasted or loaded the same way.
+$('changeUsers').addEventListener('click', () => {
+  $('usersEmpty').hidden = false; $('usersLoaded').hidden = true; $('usersMsg').textContent = '';
+  $('cancelUsers').hidden = false;
+});
+$('cancelUsers').addEventListener('click', () => { $('usersEmpty').hidden = true; $('usersLoaded').hidden = false; $('usersMsg').textContent = ''; });
 $('usersFile').addEventListener('change', e => { loadUsersFile(e.target.files[0]); e.target.value = ''; });
 // A datalist pick sets the box to a label exactly; typing part of a name only filters the list.
 $('userPick').addEventListener('input', e => {
@@ -4099,8 +4157,35 @@ function runTests() {
       ['constructor', null], ['__proto__', null], ['04', 'F'], [' 0004 ', 'F'], ['-0', 'X'], ['+2', 'R'], ['05', null], ['-1', null], ['1e1', null], ['99999999999', null],
       ['None, Read', 'M'], ['Undefined,Full', 'F'], ['Read, Full', null], ['FULL,none', null], ['Read,', null], [',Full', null]]) },
     { name: 'users file: not JSON, or not rbs-users/1 → refused with a reason', custom: () => {
-      const a = parseUserImport('{oops'), b = parseUserImport(JSON.stringify({ format: 'other' }));
-      return { ok: !!a.error && !!b.error && !a.data && !b.data, detail: `${a.error} | ${b.error}` };
+      const a = parseUserImport('{oops'), b = parseUserImport(JSON.stringify({ format: 'other' })), c = parseUserImport('<root/>');
+      return { ok: !!a.error && !!b.error && !!c.error && !a.data && !b.data && !c.data, detail: `${a.error} | ${b.error}` };
+    } },
+    { name: 'query result: the SSMS <?rbs-users …?> wrapper (with or without an XML declaration, a BOM, "?\\u003e") gives the same users as the JSON', custom: () => {
+      // The SQL writes "?>" as "?>" inside JSON strings; put that escape into the JSON text itself.
+      const json = usersDoc({ roles: [{ name: 'Clerk', defaultPermission: 'R' }, { name: 'Manager#X', defaultPermission: 'X' }] }).replace('Manager#X', 'Manager?\\u003eX');
+      const same = (t) => { const r = parseUserImport(t); return !r.error && JSON.stringify(r.data.users) === JSON.stringify(parseUserImport(json).data.users); };
+      const forms = [json, `<?rbs-users ${json}?>`, `﻿<?rbs-users ${json}?>\r\n`, `<?xml version="1.0" encoding="utf-16"?>\n<?rbs-users ${json}?>`];
+      const bad = forms.map((f, i) => same(f) ? null : i).filter(i => i !== null);
+      const name = JSON.parse(json).roles[1].name;
+      return { ok: !bad.length && name === 'Manager?>X', detail: bad.length ? `form(s) ${bad.join(', ')} differ` : `${forms.length} forms, "${name}"` };
+    } },
+    { name: 'query result cut off (SSMS limit, or copied from the grid cell) → says so and how to get all of it', custom: () => {
+      const json = usersDoc(), a = parseUserImport(`<?rbs-users ${json.slice(0, 80)}`), b = parseUserImport(json.slice(0, 80));
+      return { ok: a.error === CUT_OFF && b.error === CUT_OFF, detail: `${a.error === CUT_OFF} / ${b.error === CUT_OFF}` };
+    } },
+    { name: 'a saved result is read as UTF-16 when it starts with a byte order mark, else as UTF-8', custom: () => {
+      const text = `<?rbs-users ${usersDoc({ roles: [{ name: 'Clérk', defaultPermission: 'R' }] })}?>`;
+      const le = new Uint8Array(2 + text.length * 2); le[0] = 0xFF; le[1] = 0xFE;
+      for (let i = 0; i < text.length; i++) { le[2 + i * 2] = text.charCodeAt(i) & 255; le[3 + i * 2] = text.charCodeAt(i) >> 8; }
+      const utf8 = new TextEncoder().encode('﻿' + text);
+      // A Windows ("ANSI") save: é is the single byte 0xE9, which isn't valid UTF-8.
+      const ansi = Uint8Array.from(text, ch => ch.charCodeAt(0) < 256 ? ch.charCodeAt(0) : 63);
+      const ok = decodeUsersFile(le.buffer).replace(/^﻿/, '') === text && decodeUsersFile(utf8.buffer) === text && decodeUsersFile(ansi.buffer) === text;
+      return { ok, detail: ok ? 'UTF-16LE, UTF-8 (with BOM) and Windows-1252 all decode' : 'decode mismatch' };
+    } },
+    { name: 'query result copied with its column header ("Copy with Headers") still loads', custom: () => {
+      const json = usersDoc(), r = parseUserImport(`rbsUsers\r\n<?rbs-users ${json}?>\r\n`);
+      return { ok: !r.error && r.data.users.length === 1, detail: r.error || `${r.data.users.length} user` };
     } },
     { name: 'users file: site default "f" is Full; a role default X stays X (the site default); R stays R', custom: () => {
       const r = oneUser({ siteLevelDefault: 'f' }), u = r.data.users[0];
