@@ -211,11 +211,18 @@ header.app .links { align-items: center; }
   display: grid;
   /* minmax(0, …): a plain 1fr grows to fit its widest child, so a wide sheet table stretched the whole
      page sideways instead of scrolling inside its own box. */
-  grid-template-columns: 400px minmax(0, 1fr);
-  gap: 20px;
+  grid-template-columns: var(--left-w, 400px) 8px minmax(0, 1fr); /* left pane · drag handle · results */
+  gap: 6px;
   padding: 20px 28px;
   align-items: start;
 }
+/* Drag handle between the left pane and the results (see initPaneResizer). Stretches to the row height so
+   it can be grabbed anywhere alongside the left pane. */
+.pane-resize { align-self: stretch; cursor: col-resize; touch-action: none; border-radius: 4px; position: relative; }
+.pane-resize::before { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: var(--border); border-radius: 1px; }
+.pane-resize:hover, .pane-resize.dragging, .pane-resize:focus-visible { background: var(--accent-soft); outline: none; }
+.pane-resize:hover::before, .pane-resize.dragging::before, .pane-resize:focus-visible::before { background: var(--accent); }
+body.pane-dragging { cursor: col-resize; user-select: none; }
 .left {
   position: sticky;
   top: 20px;
@@ -760,7 +767,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
 <header class="app">
   <div class="titleblock">
     <h1>RBS Resolver</h1>
-    <div class="sub">
+    <div class="sub" id="appIntro">
       Visualises how the Odessa Framework's role-based security sheet resolves into a final permission for a given user, target,
       and field. Upload your RBS workbook, pick a target, list the user's roles, and inspect the cascade.
     </div>
@@ -854,6 +861,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
       <div style="text-align:center; margin-top:10px;"><a href="#" id="runTests" style="font-size:11px; color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--muted);">Run algorithm tests</a></div>
     </div>
   </div>
+  <div class="pane-resize" id="paneResize" tabindex="0" role="separator" aria-orientation="vertical" aria-label="Resize the left panel (drag, or use the arrow keys; double-click to reset)" title="Drag to resize · double-click to reset"></div>
   <div class="right">
     <!-- Mode toggle: lives above the output — switches the view, not the inputs -->
     <div class="mode-toggle" id="modeToggle" role="tablist" aria-label="Resolver mode">
@@ -1737,8 +1745,72 @@ $('loadDemo').addEventListener('click', () => {
   btn.addEventListener('click', () => window.rbsTheme.toggle());
 })();
 
+// Left pane width: drag the handle between the panes, or focus it and use the arrow keys; double-click
+// resets. Kept between the width the role row needs (role name + the default-access dropdown) and half the
+// page, so the results always keep room. Remembered per browser.
+const LEFT_W_DEFAULT = 400, LEFT_W_MIN = 360;
+let leftPaneWanted = LEFT_W_DEFAULT; // the width the user chose; what's shown is this, fitted to the window
+let leftPaneWidth = LEFT_W_DEFAULT;  // the width shown now
+try { const w = parseInt(localStorage.getItem('rbs-left-w'), 10); if (w >= LEFT_W_MIN) leftPaneWanted = w; } catch (e) {}
+function leftPaneMax() { // half the layout's content width (inside its padding), so the results keep at least as much
+  const layout = document.querySelector('.layout'), cs = getComputedStyle(layout);
+  const inner = layout.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  return Math.max(LEFT_W_MIN, Math.floor(inner / 2));
+}
+function applyLeftPaneWidth() {
+  const max = leftPaneMax();
+  leftPaneWidth = Math.round(Math.min(max, Math.max(LEFT_W_MIN, leftPaneWanted)));
+  document.querySelector('.layout').style.setProperty('--left-w', leftPaneWidth + 'px');
+  const h = $('paneResize');
+  h.setAttribute('aria-valuenow', String(leftPaneWidth));
+  h.setAttribute('aria-valuemax', String(max));
+}
+// A deliberate change (drag, keys, reset): becomes the chosen width, fitted to the window.
+function setLeftPaneWidth(w, save) {
+  leftPaneWanted = Math.round(Math.min(leftPaneMax(), Math.max(LEFT_W_MIN, w)));
+  applyLeftPaneWidth();
+  if (save) try { localStorage.setItem('rbs-left-w', String(leftPaneWanted)); } catch (e) {}
+}
+(function initPaneResizer() {
+  const h = $('paneResize');
+  h.setAttribute('aria-valuemin', String(LEFT_W_MIN));
+  applyLeftPaneWidth();
+  h.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return; // left button / touch / pen only — a right-click must not start a drag
+    e.preventDefault();
+    const startX = e.clientX, startW = leftPaneWidth;
+    let moved = false, done = false;
+    try { h.setPointerCapture(e.pointerId); } catch (err) {} // without capture the drag still ends on pointerup
+    h.classList.add('dragging');
+    document.body.classList.add('pane-dragging');
+    const move = ev => { moved = true; setLeftPaneWidth(startW + ev.clientX - startX, false); };
+    // Ends on whichever comes first: pointerup, pointercancel, or lostpointercapture (any other release).
+    const end = () => {
+      if (done) return;
+      done = true;
+      h.classList.remove('dragging');
+      document.body.classList.remove('pane-dragging');
+      for (const [t, f] of [['pointermove', move], ['pointerup', end], ['pointercancel', end], ['lostpointercapture', end]]) h.removeEventListener(t, f);
+      // A click without a drag (focusing the handle, a double-click) must not replace the saved width with
+      // the one fitted to this window.
+      if (moved) setLeftPaneWidth(leftPaneWidth, true);
+    };
+    h.addEventListener('pointermove', move);
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) h.addEventListener(t, end);
+  });
+  h.addEventListener('dblclick', () => setLeftPaneWidth(LEFT_W_DEFAULT, true));
+  h.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    setLeftPaneWidth(leftPaneWidth + (e.key === 'ArrowRight' ? 20 : -20), true);
+  });
+  // A saved width can be too wide for a smaller window; re-fit it without forgetting the saved choice.
+  window.addEventListener('resize', applyLeftPaneWidth);
+})();
+
 function onLoaded() {
   if (!parsed) return;
+  if ($('appIntro')) $('appIntro').hidden = true; // the intro only helps before a workbook is loaded
   $('systemPanel').style.display = '';
   $('rolesPanel').style.display = '';
   $('queryPanel').style.display = '';
