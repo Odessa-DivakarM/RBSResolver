@@ -361,3 +361,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# RBS Resolver user exports (scripts/export-users.ps1): every login and its roles; keep private
+*.rbs-users.json
