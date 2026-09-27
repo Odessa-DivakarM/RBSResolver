@@ -9,37 +9,34 @@
 <meta charset="utf-8">
 <title>RBS Resolver — Algorithm specification</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <script>
-// Theme, resolved before first paint so a dark page never flashes white. The SAME script is in
-// index.html and SPEC.html — keep the two copies identical. The saved choice ('light' | 'dark')
-// lives in localStorage['rbs-theme']; absent = follow the OS. Printing always uses the light theme.
+// Theme, resolved before first paint so the page never flashes the wrong theme. The SAME script is in
+// index.html and SPEC.html — keep the two copies identical. Light is the default whatever the OS
+// prefers; choosing dark saves 'dark' in localStorage['rbs-theme'] (absent = light). Printing always
+// uses the light theme.
 (function () {
-  var KEY = 'rbs-theme', root = document.documentElement, mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var KEY = 'rbs-theme', root = document.documentElement;
   var mem = null; // stands in for storage when it is blocked, so the button still works for this page view
   function stored() {
     var v = mem;
     try { v = localStorage.getItem(KEY); } catch (e) {}
-    return v === 'light' || v === 'dark' ? v : null;
+    return v === 'dark' ? 'dark' : 'light';
   }
-  function os() { return mq.matches ? 'dark' : 'light'; }
   function apply() {
-    root.dataset.theme = stored() || os();
+    root.dataset.theme = stored();
     if (window.rbsTheme.onchange) window.rbsTheme.onchange(root.dataset.theme);
   }
   window.rbsTheme = {
     onchange: null,
-    // Flip light <-> dark. Landing on the OS's own theme clears the saved choice, so the page goes
-    // back to following the OS rather than pinning it.
+    // Flip light <-> dark. Going back to light clears the saved choice, since light is the default.
     toggle: function () {
-      var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
-      mem = next === os() ? null : next;
+      mem = root.dataset.theme === 'dark' ? null : 'dark';
       try { if (mem) localStorage.setItem(KEY, mem); else localStorage.removeItem(KEY); } catch (e) {}
       apply();
     }
   };
   apply();
-  if (mq.addEventListener) mq.addEventListener('change', apply); else if (mq.addListener) mq.addListener(apply);
   window.addEventListener('storage', function (e) { if (e.key === KEY) apply(); }); // changed in another tab
   window.addEventListener('beforeprint', function () { root.dataset.theme = 'light'; });
   window.addEventListener('afterprint', apply);

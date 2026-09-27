@@ -2,38 +2,35 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>RBS Resolver — Odessa Framework permission visualizer</title>
 <script>
-// Theme, resolved before first paint so a dark page never flashes white. The SAME script is in
-// index.html and SPEC.html — keep the two copies identical. The saved choice ('light' | 'dark')
-// lives in localStorage['rbs-theme']; absent = follow the OS. Printing always uses the light theme.
+// Theme, resolved before first paint so the page never flashes the wrong theme. The SAME script is in
+// index.html and SPEC.html — keep the two copies identical. Light is the default whatever the OS
+// prefers; choosing dark saves 'dark' in localStorage['rbs-theme'] (absent = light). Printing always
+// uses the light theme.
 (function () {
-  var KEY = 'rbs-theme', root = document.documentElement, mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var KEY = 'rbs-theme', root = document.documentElement;
   var mem = null; // stands in for storage when it is blocked, so the button still works for this page view
   function stored() {
     var v = mem;
     try { v = localStorage.getItem(KEY); } catch (e) {}
-    return v === 'light' || v === 'dark' ? v : null;
+    return v === 'dark' ? 'dark' : 'light';
   }
-  function os() { return mq.matches ? 'dark' : 'light'; }
   function apply() {
-    root.dataset.theme = stored() || os();
+    root.dataset.theme = stored();
     if (window.rbsTheme.onchange) window.rbsTheme.onchange(root.dataset.theme);
   }
   window.rbsTheme = {
     onchange: null,
-    // Flip light <-> dark. Landing on the OS's own theme clears the saved choice, so the page goes
-    // back to following the OS rather than pinning it.
+    // Flip light <-> dark. Going back to light clears the saved choice, since light is the default.
     toggle: function () {
-      var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
-      mem = next === os() ? null : next;
+      mem = root.dataset.theme === 'dark' ? null : 'dark';
       try { if (mem) localStorage.setItem(KEY, mem); else localStorage.removeItem(KEY); } catch (e) {}
       apply();
     }
   };
   apply();
-  if (mq.addEventListener) mq.addEventListener('change', apply); else if (mq.addListener) mq.addListener(apply);
   window.addEventListener('storage', function (e) { if (e.key === KEY) apply(); }); // changed in another tab
   window.addEventListener('beforeprint', function () { root.dataset.theme = 'light'; });
   window.addEventListener('afterprint', apply);
@@ -214,7 +211,7 @@ header.app .links { align-items: center; }
   display: grid;
   /* minmax(0, …): a plain 1fr grows to fit its widest child, so a wide sheet table stretched the whole
      page sideways instead of scrolling inside its own box. */
-  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-columns: 400px minmax(0, 1fr);
   gap: 20px;
   padding: 20px 28px;
   align-items: start;
@@ -314,7 +311,9 @@ button.secondary {
 button.secondary:hover { border-color: var(--accent); color: var(--accent); }
 .role-row {
   display: grid;
-  grid-template-columns: 1fr 100px 28px;
+  /* auto: the default-access dropdown is as wide as its longest option ("X — Site level default"), so the
+     chosen value is never cut off; the role name takes the rest. */
+  grid-template-columns: 1fr auto 28px;
   gap: 6px;
   margin-bottom: 6px;
   align-items: center;
@@ -801,7 +800,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
     <div class="panel" id="systemPanel" style="display:none;">
       <h2>System config</h2>
       <div class="field">
-        <label>GP system fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' in your Odessa DB. Used when a role's default permission is X (not set).">?</span></label>
+        <label>GP system fallback permission<span class="tip" tabindex="0" data-tip="Global Parameter 'UserRole.DefaultRolePermission' in your Odessa DB. Used when a role's default permission is X (site level default).">?</span></label>
         <select id="siteLevelDefault">
           <option value="F" selected>F &mdash; Full</option>
           <option value="M">M &mdash; Modify</option>
@@ -815,7 +814,7 @@ table.fc-table td.fc-dedicated { text-align: center; font-size: 11px; color: var
       <div class="field"><label>Roles assigned to the user<span class="tip" tabindex="0" data-tip="Role Names and the Default Permission value from Roles.DefaultPermission table in your Odessa DB">?</span></label></div>
       <div id="roleList"></div>
       <button class="secondary" id="addRole" style="margin-top:6px;">+ add role</button>
-      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (not set)</strong>, the system uses the GP fallback above.</p>
+      <p class="muted-note">Each role has a general access level stored in the database. If it's set to <strong>X (site level default)</strong>, the system uses the GP fallback above.</p>
     </div>
     <div class="panel" id="queryPanel" style="display:none;">
       <h2>What are you checking?</h2>
@@ -1103,15 +1102,7 @@ function normBool3(v) {
 function parseWorkbook(wb) {
   const out = { Entities: [], Transactions: [], Tasks: [], roles: [] };
 
-  if (wb.Sheets['Roles']) {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets['Roles'], { header: 1, defval: '' });
-    for (const r of rows) {
-      const v = String(r[0] == null ? '' : r[0]).trim();
-      if (!v || v === '#') continue;
-      if (/^roles?$/i.test(v)) continue;
-      out.roles.push(v);
-    }
-  }
+  if (wb.Sheets['Roles']) out.roles = parseRoleNames(XLSX.utils.sheet_to_json(wb.Sheets['Roles'], { header: 1, defval: '' }));
   for (const name of ['Entities', 'Transactions', 'Tasks']) {
     if (!wb.Sheets[name]) continue;
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
@@ -1125,19 +1116,28 @@ function parseWorkbook(wb) {
 // thread doesn't run XLSX.read/sheet_to_json itself.
 function parseWorkbookFromSheets(sheets) {
   const out = { Entities: [], Transactions: [], Tasks: [], roles: [] };
-  if (sheets.Roles) {
-    for (const r of sheets.Roles) {
-      const v = String(r[0] == null ? '' : r[0]).trim();
-      if (!v || v === '#') continue;
-      if (/^roles?$/i.test(v)) continue;
-      out.roles.push(v);
-    }
-  }
+  if (sheets.Roles) out.roles = parseRoleNames(sheets.Roles);
   for (const name of ['Entities', 'Transactions', 'Tasks']) {
     if (!sheets[name]) continue;
     out[name] = parseBlocks(sheets[name]);
   }
   return out;
+}
+
+// Roles sheet: column A lists the role names. The framework's generator (RbsFileGenerator) writes a
+// "Name" header first, so the first entry is dropped when it looks like a header. Only the first —
+// a real role further down is never dropped, whatever it is called.
+function parseRoleNames(rows) {
+  const roles = [];
+  let first = true;
+  for (const r of rows) {
+    const v = String(r[0] == null ? '' : r[0]).trim();
+    if (!v || v === '#') continue;
+    const isHeader = first && /^(roles?|(role ?)?names?)$/i.test(v);
+    first = false;
+    if (!isHeader) roles.push(v);
+  }
+  return roles;
 }
 
 function parseBlocks(rows) {
@@ -1863,7 +1863,8 @@ function renderConditions() {
 
 $('addRole').addEventListener('click', () => { addRoleRow(); renderRoles(); rolesChanged(); });
 function addRoleRow() {
-  userRoles.push({ name: (parsed && parsed.roles && parsed.roles[0]) || '', defaultPermission: 'N' });
+  // Start blank so the placeholder prompts for a role, rather than pre-filling one the user didn't choose.
+  userRoles.push({ name: '', defaultPermission: 'N' });
 }
 // Field View output depends on userRoles — refresh it live when roles change.
 // Touches only #fieldOutput (not the roles panel), so input focus is preserved while typing.
@@ -1874,8 +1875,14 @@ function rolesChanged(typing) { rolesUserModified = true; if (appMode === 'field
 let traceRefreshTimer = 0;
 function refreshTrace(delayMs) {
   clearTimeout(traceRefreshTimer);
-  const run = () => { if (appMode === 'single' && currentBlock && $('output').querySelector('.final-card')) runEvaluate(); };
+  const run = () => { if (appMode === 'single' && currentBlock && $('output').querySelector('.final-card, .needs-role')) runEvaluate(); };
   if (delayMs > 0) traceRefreshTimer = setTimeout(run, delayMs); else run();
+}
+// With no role named, the answer would describe a user with no roles at all (often the shared * rule's
+// value), which reads as if the user had that access. Trace and Role Matrix ask for a role instead.
+function hasNamedRole() { return userRoles.some(r => r.name && r.name.trim()); }
+function needsRoleState() {
+  return `<div class="empty-state needs-role"><div class="big">Add a role first</div>Enter or pick at least one of the user's roles under <em>Who is the user?</em> on the left.</div>`;
 }
 function renderRoles() {
   const list = $('roleList');
@@ -1887,13 +1894,14 @@ function renderRoles() {
     nameInput.type = 'text';
     nameInput.value = r.name;
     nameInput.setAttribute('list', 'rolesList');
-    nameInput.placeholder = 'role name';
+    nameInput.placeholder = 'Enter or pick a role';
     nameInput.addEventListener('input', e => { r.name = e.target.value; rolesChanged(true); });
     row.appendChild(nameInput);
     const permSel = document.createElement('select');
     for (const p of ['F', 'M', 'R', 'N', 'X']) {
       const opt = document.createElement('option');
-      opt.value = p; opt.textContent = `${p} — ${PERM_NAME[p]}`;
+      // X in a role's DB default means "use the site-level GP fallback", not an undefined value.
+      opt.value = p; opt.textContent = `${p} — ${p === 'X' ? 'Site level default' : PERM_NAME[p]}`;
       if (r.defaultPermission === p) opt.selected = true;
       permSel.appendChild(opt);
     }
@@ -1910,6 +1918,7 @@ function renderRoles() {
 $('evaluate').addEventListener('click', runEvaluate);
 function runEvaluate() {
   if (!currentBlock) return;
+  if (!hasNamedRole()) { $('output').innerHTML = needsRoleState(); return; }
   const opName = $('operation').value || null;
   const trace = evaluate(currentBlock, opName, userRoles, siteLevelDefault, entityState);
   const lim = recordLimitFor(currentSheet, currentBlock, opName, userRoles, siteLevelDefault, entityState);
@@ -2029,7 +2038,7 @@ function easyBannerText(raw) {
   if (raw.startsWith('Parse warning'))
     return 'The spreadsheet contains some unexpected values. They\'ve been treated as "not set" (X).';
   if (raw.startsWith('Site-level substitution'))
-    return 'One or more roles had no default permission set, so the system used your system fallback value.';
+    return 'One or more roles have X (site level default), so the system used the GP fallback value.';
   if (raw.startsWith('Role "')) {
     const m = raw.match(/^Role "(.*?)" is not/);
     const name = m ? escapeHtml(m[1]) : 'unknown';
@@ -2189,7 +2198,7 @@ function buildNarrativeTrace(t) {
     }
     if (role.substituted) {
       addStoryBlock(host,
-        `Note: <strong>${escapeHtml(role.role)}</strong>'s database default was X (not set), so it was replaced with the system fallback (${permChip(role.defaultPerm)}) before checking.`);
+        `Note: <strong>${escapeHtml(role.role)}</strong>'s database default was X (site level default), so it was replaced with the system fallback (${permChip(role.defaultPerm)}) before checking.`);
     }
     if (!compact) {
       addStoryBlock(host,
@@ -2337,7 +2346,7 @@ function buildChildPanel(lim, sheetBlocks) {
     const site = normCode(siteLevelDefault || 'F');
     const list = userRoles.filter(r => r.name).map(r => {
       const p = normCode(r.defaultPermission);
-      return `${escapeHtml(r.name)} ${p === 'X' ? `(not set &rarr; system fallback ${site})` : p}`;
+      return `${escapeHtml(r.name)} ${p === 'X' ? `(X, site level default &rarr; system fallback ${site})` : p}`;
     }).join(', ');
     note(`${cn} has no block without record properties in the sheet, so the system uses the highest default access level among the user's roles${list ? `: ${list}` : ''}.`);
     return panel;
@@ -3706,6 +3715,7 @@ function renderMatrix() {
     host.innerHTML = `<div class="empty-state"><div class="big">No workbook loaded</div>Upload a sheet first, then return to access matrix.</div>`;
     return;
   }
+  if (!hasNamedRole()) { host.innerHTML = needsRoleState(); return; }
 
   host.appendChild(buildMatrixFilterBar());
   const hint = dismissibleHint('matrixDrill', `💡 Click any permission cell to see <strong>why</strong> it resolved that way — it opens the full step-by-step in <strong>Trace</strong>.`);
@@ -4270,7 +4280,7 @@ function computeChangeOptions(block, operationName, roleName, roleDefault, targe
   // C — change the role's default access level
   const subst = trace.substitutions.find(s => s.role === roleName);
   const curDef = subst
-    ? ` (currently not set, so the system-wide default — <strong>${subst.resolved}</strong> — is used.)`
+    ? ` (currently X, site level default, so the system fallback — <strong>${subst.resolved}</strong> — is used.)`
     : ` (currently ${cur(roleDefault)}.)`;
   options.push({
     letter: 'C', applicable: true,
